@@ -333,8 +333,125 @@ def contract_kv_from_stacked(stacked: torch.Tensor) -> tuple[torch.Tensor, torch
     return stacked[0].reshape(rows, head_dim), stacked[1].reshape(rows, head_dim)
 
 
+def referenced_page_ids(
+    block_table: torch.Tensor,
+    slot_mapping: torch.Tensor,
+    seq_lens: torch.Tensor,
+    *,
+    page_size: int = PAGE_SIZE,
+) -> torch.Tensor:
+    """Physical page ids touched by this step (vLLM BlockManager ids)."""
+    table = block_table.to(dtype=torch.int64)
+    if table.ndim == 1:
+        batch = int(seq_lens.numel())
+        if table.numel() % batch != 0:
+            raise ValueError("flat block_table is not divisible by batch")
+        table = table.reshape(batch, -1)
+    blocks_needed = (seq_lens.to(dtype=torch.int64).clamp(min=1) + page_size - 1) // page_size
+    mask = torch.arange(table.shape[1], device=table.device).unsqueeze(0) < blocks_needed.unsqueeze(1)
+    pages = table.masked_select(mask)
+    slot_pages = slot_mapping.to(dtype=torch.int64).reshape(-1) // page_size
+    pages = torch.cat((pages, slot_pages), dim=0)
+    pages = pages[pages >= 0]
+    unique_pages = torch.unique(pages, sorted=True)
+    if unique_pages.numel() == 0:
+        raise ValueError("no referenced KV pages")
+    return unique_pages.to(dtype=torch.int64)
+
+
+def compact_vllm_kv_for_contract(
+    layer_kvs: Sequence[Any],
+    block_table: torch.Tensor,
+    slot_mapping: torch.Tensor,
+    seq_lens: torch.Tensor,
+    *,
+    page_size: int = PAGE_SIZE,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Copy only referenced vLLM pages into a layer-major contract buffer.
+
+    Returns ``(k, v, compact_block_table, compact_slot_mapping, phys_pages)``.
+    ``phys_pages[compact_id]`` is the original vLLM page id so the caller can
+    scatter writes back. This does not allocate a second block pool.
+    """
+    phys_pages = referenced_page_ids(
+        block_table, slot_mapping, seq_lens, page_size=page_size
+    )
+    page_to_compact = torch.full(
+        (int(phys_pages.max().item()) + 1,),
+        -1,
+        dtype=torch.int64,
+        device=phys_pages.device,
+    )
+    page_to_compact[phys_pages] = torch.arange(phys_pages.numel(), device=phys_pages.device)
+
+    table = block_table.to(dtype=torch.int64)
+    if table.ndim == 1:
+        batch = int(seq_lens.numel())
+        table = table.reshape(batch, -1)
+    blocks_needed = (seq_lens.to(dtype=torch.int64).clamp(min=1) + page_size - 1) // page_size
+    valid = torch.arange(table.shape[1], device=table.device).unsqueeze(0) < blocks_needed.unsqueeze(1)
+    compact_table = torch.zeros_like(table)
+    compact_table[valid] = page_to_compact[table[valid]]
+    compact_slots = page_to_compact[slot_mapping.to(dtype=torch.int64).reshape(-1) // page_size]
+    compact_slots = compact_slots * page_size + (slot_mapping.to(dtype=torch.int64).reshape(-1) % page_size)
+
+    first_k, first_v = split_vllm_layer_kv(layer_kvs[0])
+    head_dim = first_k.shape[-1]
+    num_kv_heads = first_k.shape[-2]
+    rows_per_page = page_size * num_kv_heads
+    num_layers = len(layer_kvs)
+    num_pages = int(phys_pages.numel())
+    contract_rows = num_layers * num_pages * rows_per_page
+    key = first_k.new_empty((contract_rows, head_dim))
+    value = first_v.new_empty((contract_rows, head_dim))
+    for layer_idx, layer_kv in enumerate(layer_kvs):
+        layer_key, layer_value = split_vllm_layer_kv(layer_kv)
+        dst0 = layer_idx * num_pages * rows_per_page
+        gathered_k = layer_key.index_select(0, phys_pages).reshape(num_pages * rows_per_page, head_dim)
+        gathered_v = layer_value.index_select(0, phys_pages).reshape(num_pages * rows_per_page, head_dim)
+        key[dst0 : dst0 + gathered_k.shape[0]].copy_(gathered_k)
+        value[dst0 : dst0 + gathered_v.shape[0]].copy_(gathered_v)
+    return (
+        key,
+        value,
+        compact_table.to(dtype=torch.int32).reshape(-1).contiguous(),
+        compact_slots.to(dtype=torch.int32).contiguous(),
+        phys_pages,
+    )
+
+
+def scatter_contract_kv_to_vllm(
+    key: torch.Tensor,
+    value: torch.Tensor,
+    layer_kvs: Sequence[Any],
+    phys_pages: torch.Tensor,
+    *,
+    page_size: int = PAGE_SIZE,
+) -> None:
+    """Write compact contract pages back into the original vLLM page ids."""
+    num_layers = len(layer_kvs)
+    num_pages = int(phys_pages.numel())
+    first_k, _ = split_vllm_layer_kv(layer_kvs[0])
+    rows_per_page = page_size * first_k.shape[-2]
+    head_dim = first_k.shape[-1]
+    expected = num_layers * num_pages * rows_per_page
+    if key.shape[0] != expected or value.shape[0] != expected:
+        raise ValueError(f"contract KV rows {tuple(key.shape)} != {expected}")
+    for layer_idx, layer_kv in enumerate(layer_kvs):
+        layer_key, layer_value = split_vllm_layer_kv(layer_kv)
+        src0 = layer_idx * num_pages * rows_per_page
+        packed_k = key[src0 : src0 + num_pages * rows_per_page].reshape(
+            num_pages, page_size, first_k.shape[-2], head_dim
+        )
+        packed_v = value[src0 : src0 + num_pages * rows_per_page].reshape(
+            num_pages, page_size, first_k.shape[-2], head_dim
+        )
+        layer_key[phys_pages] = packed_k
+        layer_value[phys_pages] = packed_v
+
+
 def stack_vllm_kv_as_contract(
-    layer_kvs: Sequence[torch.Tensor],
+    layer_kvs: Sequence[Any],
 ) -> tuple[torch.Tensor, torch.Tensor, bool]:
     """Stack per-layer vLLM KV into contract ``(k, v, shared_storage)``.
 

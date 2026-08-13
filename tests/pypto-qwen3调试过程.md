@@ -62,6 +62,11 @@
 - 原因：昇腾 allocate 路径是每层 `(k, v)` 两个 4D 页，不是 `(2, P, S, H, D)`。适配层误把 tuple 的 `[0]` 当成 virtual-engine。
 - 处理：`split_vllm_layer_kv` 同时接受 5D stacked 和 `(k, v)` 4D pair。
 
+### 2026-08-13 阶段 6 — 整池 cat OOM
+
+- `torch.cat` 40 层 K 还要再申请 12.97 GiB；当时已占用 53.5 / 61.3 GiB。
+- 改成 `compact_vllm_kv_for_contract`：只按 `block_table`/`slot_mapping` 收集用到的 page，映射成紧凑 id，算完 `scatter` 回 vLLM 原页。分页管理仍在 vllm-ascend。
+
 ### 2026-08-13 阶段 0 — 对齐接口
 
 - 读完 `pypto-lib/models/qwen3_14b/{contract,weights,prefill_fwd,decode_fwd}.py` 与 vllm-ascend `AscendAttentionBackend.get_kv_cache_shape`。

@@ -54,11 +54,11 @@ from vllm_ascend.models.pypto_qwen3_adapter import (
     build_prefill_kernel_args,
     build_rope_tables,
     collect_hf_state_dict,
-    copy_contract_kv_to_vllm,
+    compact_vllm_kv_for_contract,
     ensure_pypto_lib_on_path,
     pack_official_weights,
+    scatter_contract_kv_to_vllm,
     slice_real_vocab_logits,
-    stack_vllm_kv_as_contract,
 )
 
 logger = init_logger(__name__)
@@ -137,7 +137,6 @@ class PyptoQwen3ForCausalLM(nn.Module):
             # profile_run / dummy_run happens before KV pages are bound.
             self._last_logits = dummy.new_zeros((1, REAL_VOCAB), dtype=torch.float32)
             return dummy
-        k_cache, v_cache, shared = stack_vllm_kv_as_contract(layer_kvs)
 
         num_tokens = int(getattr(metadata, "num_actual_tokens", input_ids.shape[0]))
         token_ids = input_ids[:num_tokens].reshape(-1)
@@ -165,6 +164,12 @@ class PyptoQwen3ForCausalLM(nn.Module):
         else:
             query_start_loc = query_start_loc[: batch + 1]
 
+        k_cache, v_cache, compact_table, compact_slots, phys_pages = compact_vllm_kv_for_contract(
+            layer_kvs,
+            block_table,
+            slot_mapping,
+            seq_lens,
+        )
         logits = token_ids.new_zeros((batch, PADDED_VOCAB), dtype=torch.float32)
         kernels = self._ensure_kernels()
 
@@ -174,8 +179,8 @@ class PyptoQwen3ForCausalLM(nn.Module):
                 input_ids=token_ids,
                 seq_lens=seq_lens,
                 query_start_loc=query_start_loc,
-                block_table=block_table,
-                slot_mapping=slot_mapping,
+                block_table=compact_table,
+                slot_mapping=compact_slots,
                 k_cache=k_cache,
                 v_cache=v_cache,
                 weights=self._bundle,
@@ -192,8 +197,8 @@ class PyptoQwen3ForCausalLM(nn.Module):
             args = build_decode_kernel_args(
                 token_ids=token_ids,
                 seq_lens=seq_lens,
-                block_table=block_table,
-                slot_mapping=slot_mapping,
+                block_table=compact_table,
+                slot_mapping=compact_slots,
                 k_cache=k_cache,
                 v_cache=v_cache,
                 weights=self._bundle,
@@ -207,12 +212,10 @@ class PyptoQwen3ForCausalLM(nn.Module):
             kernels["decode_fwd"](*args)
         else:
             # Profile / dummy batches: do not pretend a fused host ran.
-            dummy = input_ids.new_zeros((input_ids.shape[0], HIDDEN), dtype=torch.bfloat16)
             self._last_logits = logits[:, :REAL_VOCAB]
             return dummy
 
-        if not shared:
-            copy_contract_kv_to_vllm(k_cache, v_cache, layer_kvs)
+        scatter_contract_kv_to_vllm(k_cache, v_cache, layer_kvs, phys_pages)
 
         self._last_logits = slice_real_vocab_logits(logits)
         return input_ids.new_zeros((input_ids.shape[0], HIDDEN), dtype=torch.bfloat16)

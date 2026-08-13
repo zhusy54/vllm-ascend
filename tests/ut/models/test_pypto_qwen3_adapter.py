@@ -145,6 +145,33 @@ def test_stack_kv_pairs_does_not_require_5d() -> None:
     assert value.shape == key.shape
 
 
+def test_compact_kv_only_copies_referenced_pages() -> None:
+    page_size = adapter.PAGE_SIZE
+    num_pages, kv_heads, head_dim = 4, 2, 4
+    layers = []
+    for layer_idx in range(2):
+        key = torch.arange(num_pages * page_size * kv_heads * head_dim, dtype=torch.float32)
+        key = key.reshape(num_pages, page_size, kv_heads, head_dim) + layer_idx * 1000
+        value = key + 0.5
+        layers.append((key.clone(), value.clone()))
+    block_table = torch.tensor([[2, 0, 0, 0]], dtype=torch.int32)
+    slot_mapping = torch.tensor([2 * page_size + 3], dtype=torch.int32)
+    seq_lens = torch.tensor([page_size + 3], dtype=torch.int32)
+
+    key, value, compact_table, compact_slots, phys = adapter.compact_vllm_kv_for_contract(
+        layers, block_table, slot_mapping, seq_lens, page_size=page_size
+    )
+    assert phys.tolist() == [0, 2]
+    assert compact_table.reshape(-1)[:2].tolist() == [1, 0]
+    assert int(compact_slots[0].item()) == page_size + 3
+    rows_per_page = page_size * kv_heads
+    # Compact page 1 is physical page 2 of layer 0.
+    key[rows_per_page : 2 * rows_per_page] = 7
+    adapter.scatter_contract_kv_to_vllm(key, value, layers, phys, page_size=page_size)
+    assert float(layers[0][0][2, 0, 0, 0].item()) == 7.0
+    assert float(layers[0][0][1, 0, 0, 0].item()) != 7.0
+
+
 def test_copy_back_restores_separate_vllm_layers() -> None:
     layers = [
         torch.zeros(2, 2, adapter.PAGE_SIZE, adapter.NUM_KV_HEADS, adapter.HEAD_DIM)
