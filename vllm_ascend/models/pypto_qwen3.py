@@ -105,6 +105,12 @@ class PyptoQwen3ForCausalLM(nn.Module):
         logger.info("Packed official Qwen3-14B weights into the pypto contract layout")
         return set(state)
 
+    def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
+        if self._bundle is None:
+            raise RuntimeError("PyptoQwen3ForCausalLM.load_weights has not run")
+        self._maybe_move_weights(input_ids.device)
+        return torch.nn.functional.embedding(input_ids, self._bundle.padded_embed_weight)
+
     def forward(
         self,
         input_ids: torch.Tensor | None,

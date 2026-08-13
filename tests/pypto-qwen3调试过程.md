@@ -41,6 +41,12 @@
 
 ## 阶段日志
 
+### 2026-08-13 阶段 3 — 第一次 launch 失败
+
+- `LLM(...)` 在 `ModelConfig` 校验时报：`This model does not support --runner generate`。
+- 原因：vLLM 用 `is_vllm_model` 认生成模型，要求类上有 `embed_input_ids`。缺了就被当成非 generate。
+- 处理：给 `PyptoQwen3ForCausalLM` 补上 `embed_input_ids`（查 embedding 表；真正计算仍在 pypto host 里做）。
+
 ### 2026-08-13 阶段 0 — 对齐接口
 
 - 读完 `pypto-lib/models/qwen3_14b/{contract,weights,prefill_fwd,decode_fwd}.py` 与 vllm-ascend `AscendAttentionBackend.get_kv_cache_shape`。
