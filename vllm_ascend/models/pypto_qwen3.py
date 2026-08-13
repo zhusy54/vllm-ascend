@@ -70,8 +70,8 @@ from vllm_ascend.models.pypto_qwen3_adapter import (
 from vllm_ascend.models.pypto_qwen3_tp import (
     COMM_MARKER,
     build_gloo_shmem_comm,
-    gloo_gather_contract_bundle,
-    shard_contract_bundle,
+    describe_tp_compute_args,
+    select_compute_bundle,
     tp_rank_and_world,
 )
 
@@ -124,6 +124,8 @@ class PyptoQwen3ForCausalLM(nn.Module):
         self._kernels: dict[str, object] | None = None
         self._chip: PyptoChipSession | None = None
         self._tp_comm = None
+        self._tp_runner = None
+        self._tp_world = 1
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         consumed = collect_hf_state_dict(weights)
@@ -136,18 +138,16 @@ class PyptoQwen3ForCausalLM(nn.Module):
             pack_official_weights(state.items(), padded_vocab=PADDED_VOCAB)
         )
         tp_rank, tp_world = tp_rank_and_world()
+        self._tp_world = tp_world
         if tp_world > 1:
-            shard = shard_contract_bundle(bundle, tp_rank, tp_world)
+            bundle = select_compute_bundle(bundle, tp_rank, tp_world)
             print(
                 f"PYPTO_QWEN3_TP_SHARD rank={tp_rank}/{tp_world} "
-                f"wq={tuple(shard.wq.shape)} wo={tuple(shard.wo.shape)} "
-                f"w_down={tuple(shard.w_down.shape)}",
+                f"wq={tuple(bundle.wq.shape)} wo={tuple(bundle.wo.shape)} "
+                f"w_down={tuple(bundle.w_down.shape)}",
                 flush=True,
             )
-            group = _tp_cpu_group()
-            bundle = gloo_gather_contract_bundle(
-                shard, rank=tp_rank, world=tp_world, group=group
-            )
+            print(f"PYPTO_QWEN3_ARGS {describe_tp_compute_args(bundle)}", flush=True)
         # Keep contract weights as a Python object, not nn buffers, so
         # ``LLM(dtype=bfloat16)`` cannot recast RMS / RoPE to bf16.
         if torch.npu.is_available():
@@ -275,6 +275,21 @@ class PyptoQwen3ForCausalLM(nn.Module):
             f"dev={k_cache.device} wq_dev={self._bundle.wq.device}",
             flush=True,
         )
+        if self._tp_world > 1:
+            real = self._forward_tp(token_ids, seq_lens, num_prefills=num_prefills, num_decodes=num_decodes)
+            if real is None:
+                self._last_logits = logits[:, :REAL_VOCAB].contiguous()
+                return dummy
+            self._last_logits = real
+            topv, topi = torch.topk(real[0], k=min(4, real.shape[-1]))
+            print(
+                f"PYPTO_QWEN3_LOGITS stage=tp batch={batch} ntok={num_tokens} "
+                f"seq={seq_lens.tolist()} argmax={int(real[0].argmax())} "
+                f"top_ids={topi.tolist()} top_val={[float(v) for v in topv]}",
+                flush=True,
+            )
+            return input_ids.new_zeros((input_ids.shape[0], HIDDEN), dtype=torch.bfloat16)
+
         kernels = self._ensure_kernels()
         chip = None if os.environ.get("PYPTO_QWEN3_CPU_INVOKE") == "1" else self._ensure_chip()
 
@@ -323,13 +338,6 @@ class PyptoQwen3ForCausalLM(nn.Module):
         scatter_contract_kv_to_vllm(k_cache, v_cache, layer_kvs, phys_pages)
 
         real = slice_real_vocab_logits(logits).contiguous()
-        tp_rank, tp_world = tp_rank_and_world()
-        if tp_world > 1:
-            comm = self._ensure_tp_comm(real.device)
-            reduced = comm.allreduce_sum(real[0, :HIDDEN])
-            real = real.clone()
-            real[0, :HIDDEN] = reduced.to(dtype=real.dtype) / tp_world
-            print(COMM_MARKER, f"stage={stage} rank={tp_rank}", flush=True)
         self._last_logits = real
         topv, topi = torch.topk(real[0], k=min(4, real.shape[-1]))
         print(
@@ -351,6 +359,41 @@ class PyptoQwen3ForCausalLM(nn.Module):
             else:
                 logits = logits[: hidden_states.shape[0]].contiguous()
         return logits
+
+    def _forward_tp(
+        self,
+        token_ids: torch.Tensor,
+        seq_lens: torch.Tensor,
+        *,
+        num_prefills: int,
+        num_decodes: int,
+    ) -> torch.Tensor | None:
+        runner = self._ensure_tp_runner()
+        seq = int(seq_lens[0].item())
+        if num_prefills > 0 and num_decodes == 0:
+            return runner.prefill(token_ids)
+        if num_decodes > 0 and num_prefills == 0:
+            return runner.decode(token_ids, seq)
+        return None
+
+    def _ensure_tp_runner(self):
+        if self._tp_runner is not None:
+            return self._tp_runner
+        from vllm_ascend.models.pypto_qwen3_tp_runner import PyptoTpRunner
+
+        if self._bundle is None:
+            raise RuntimeError("PyptoQwen3ForCausalLM.load_weights has not run")
+        comm = self._ensure_tp_comm(self._bundle.wq.device)
+        self._tp_runner = PyptoTpRunner(
+            self._bundle,
+            comm,
+            self._ensure_chip(),
+            self.rope_cos,
+            self.rope_sin,
+        )
+        self._tp_runner.compile()
+        print(COMM_MARKER, "tp_runner_ready", flush=True)
+        return self._tp_runner
 
     def _collect_layer_kvs(self) -> list[torch.Tensor]:
         layer_kvs: list[torch.Tensor] = []

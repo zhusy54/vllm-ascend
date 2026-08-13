@@ -3,16 +3,17 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 #
-"""Two-rank TP generate: Gloo + torch_npu SHMEM + pypto allreduce.
+"""Two-rank Megatron TP generate: Gloo + torch_npu SHMEM + pypto collectives.
 
 Launch::
 
     source /mnt/workspace/inductor/shmem/install/set_env.sh
-    torchrun --standalone --nproc_per_node=2 \\
+    python -m torch.distributed.run --standalone --nproc_per_node=2 \\
         examples/offline_pypto_qwen3_14b_tp2.py
 
 Does not use vLLM EngineCore (this container's /dev/shm is 64MiB).
-Uses the shipped adapter + TP shard/gather + pypto collective.
+Each rank keeps its Megatron shard (``wq`` last-dim 2560) and runs the
+TP host. pypto allreduce is used after ``o_proj`` and ``down_proj``.
 """
 
 from __future__ import annotations
@@ -46,34 +47,19 @@ def main() -> int:
     from transformers import AutoTokenizer
 
     from vllm_ascend.models.pypto_qwen3_adapter import (
-        HEAD_DIM,
-        HIDDEN,
-        NUM_LAYERS,
-        PADDED_VOCAB,
-        PAGE_SIZE,
-        REAL_VOCAB,
-        SAMPLED_IDS_PAD,
-        STAGE_DECODE,
-        STAGE_PREFILL,
         PyptoChipSession,
-        build_decode_kernel_args,
-        build_prefill_kernel_args,
         build_rope_tables,
-        compact_vllm_kv_for_contract,
-        ensure_pypto_lib_on_path,
-        invoke_pypto_kernel,
         load_hf_state_from_dir,
         pack_official_weights,
         pin_weight_bundle_dtypes,
-        scatter_contract_kv_to_vllm,
-        slice_real_vocab_logits,
     )
     from vllm_ascend.models.pypto_qwen3_tp import (
         COMM_MARKER,
         build_gloo_shmem_comm,
-        gloo_gather_contract_bundle,
-        shard_contract_bundle,
+        describe_tp_compute_args,
+        select_compute_bundle,
     )
+    from vllm_ascend.models.pypto_qwen3_tp_runner import PyptoTpRunner
 
     if not Path(MODEL_PATH).exists():
         print(f"model path missing: {MODEL_PATH}", file=sys.stderr)
@@ -94,14 +80,6 @@ def main() -> int:
     torch.npu.set_device(local_rank)
     device = f"npu:{local_rank}"
 
-    os.environ.setdefault("QWEN3_PA_BLOCK_DIM", "20")
-    ensure_pypto_lib_on_path()
-    from contract.registry import get_contract
-    from pypto.backend import BackendType, set_backend_type
-
-    set_backend_type(BackendType.Ascend910B)
-    kernels = get_contract("qwen3", "14b").load_kernels().functions
-
     tok = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
     prompt = tok.apply_chat_template(
         [{"role": "user", "content": "1+1等于几？只回答数字。"}],
@@ -113,14 +91,20 @@ def main() -> int:
     ntok = int(input_ids.numel())
 
     bundle = pin_weight_bundle_dtypes(pack_official_weights(load_hf_state_from_dir(MODEL_PATH).items()))
-    shard = shard_contract_bundle(bundle, rank, world)
+    shard = select_compute_bundle(bundle, rank, world)
+    del bundle
     print(
         f"PYPTO_QWEN3_TP_SHARD rank={rank}/{world} "
-        f"wq={tuple(shard.wq.shape)} wo={tuple(shard.wo.shape)}",
+        f"wq={tuple(shard.wq.shape)} wo={tuple(shard.wo.shape)} "
+        f"w_down={tuple(shard.w_down.shape)}",
         flush=True,
     )
-    bundle = gloo_gather_contract_bundle(shard, rank=rank, world=world, group=dist.group.WORLD)
-    bundle = type(bundle)(**{name: tensor.to(device) for name, tensor in bundle.__dict__.items()})
+    print(f"PYPTO_QWEN3_ARGS {describe_tp_compute_args(shard)}", flush=True)
+    if int(shard.wq.shape[-1]) != 2560:
+        print(f"expected wq last-dim 2560, got {tuple(shard.wq.shape)}", file=sys.stderr)
+        dist.destroy_process_group()
+        return 2
+    shard = type(shard)(**{name: tensor.to(device) for name, tensor in shard.__dict__.items()})
     rope_cos, rope_sin = build_rope_tables()
     rope_cos = rope_cos.to(device)
     rope_sin = rope_sin.to(device)
@@ -130,83 +114,20 @@ def main() -> int:
         rank=rank,
         world_size=world,
         device=device,
-        cols=HIDDEN,
         group=dist.group.WORLD,
         session=session,
     )
+    runner = PyptoTpRunner(shard, comm, session, rope_cos, rope_sin)
+    runner.compile()
 
-    n_pages = 1
-    layer_kvs = [
-        (
-            torch.zeros(n_pages, PAGE_SIZE, 8, HEAD_DIM, dtype=torch.bfloat16, device=device),
-            torch.zeros(n_pages, PAGE_SIZE, 8, HEAD_DIM, dtype=torch.bfloat16, device=device),
-        )
-        for _ in range(NUM_LAYERS)
-    ]
-
-    def _step(stage: str, token_ids: torch.Tensor, seq: int) -> torch.Tensor:
-        seq_lens = torch.tensor([seq], dtype=torch.int32, device=device)
-        query_start_loc = torch.tensor([0, int(token_ids.numel())], dtype=torch.int32, device=device)
-        block_table = torch.zeros((1, 1), dtype=torch.int32, device=device)
-        if stage == STAGE_PREFILL:
-            slot_mapping = torch.arange(int(token_ids.numel()), dtype=torch.int32, device=device)
-        else:
-            slot_mapping = torch.tensor([seq - 1], dtype=torch.int32, device=device)
-        chunk_lens = torch.tensor([int(token_ids.numel())], dtype=torch.int32, device=device)
-        k_cache, v_cache, compact_table, compact_slots, phys = compact_vllm_kv_for_contract(
-            layer_kvs, block_table, slot_mapping, seq_lens, chunk_lens=chunk_lens
-        )
-        logits = torch.zeros((1, PADDED_VOCAB), dtype=torch.float32, device=device)
-        print(f"PYPTO_QWEN3_STAGE {stage}", flush=True)
-        if stage == STAGE_PREFILL:
-            args = build_prefill_kernel_args(
-                input_ids=token_ids.to(device),
-                seq_lens=seq_lens,
-                query_start_loc=query_start_loc,
-                block_table=compact_table,
-                slot_mapping=compact_slots,
-                k_cache=k_cache,
-                v_cache=v_cache,
-                weights=bundle,
-                rope_cos=rope_cos,
-                rope_sin=rope_sin,
-                logits=logits,
-            )
-            invoke_pypto_kernel(kernels["prefill_fwd"], args, session=session)
-        else:
-            sampled_out = torch.zeros((1, SAMPLED_IDS_PAD), dtype=torch.int32, device=device)
-            next_hidden = torch.zeros((1, HIDDEN), dtype=torch.bfloat16, device=device)
-            args = build_decode_kernel_args(
-                token_ids=token_ids.to(device),
-                seq_lens=seq_lens,
-                block_table=compact_table,
-                slot_mapping=compact_slots,
-                k_cache=k_cache,
-                v_cache=v_cache,
-                weights=bundle,
-                rope_cos=rope_cos,
-                rope_sin=rope_sin,
-                logits=logits,
-                sampled_ids_out=sampled_out,
-                next_hidden=next_hidden,
-            )
-            invoke_pypto_kernel(kernels["decode_fwd"], args, session=session)
-        scatter_contract_kv_to_vllm(k_cache, v_cache, layer_kvs, phys)
-        real = slice_real_vocab_logits(logits)
-        reduced = comm.allreduce_sum(real[0, :HIDDEN])
-        real = real.clone()
-        real[0, :HIDDEN] = reduced.to(dtype=real.dtype) / world
-        print(COMM_MARKER, f"stage={stage} rank={rank}", flush=True)
-        return real
-
-    logits = _step(STAGE_PREFILL, input_ids.to(device), ntok)
+    logits = runner.prefill(input_ids.to(device))
     next_id = int(logits[0].argmax().item())
     ids = [next_id]
     max_tokens = int(os.environ.get("PYPTO_MAX_TOKENS", "32"))
     seq = ntok + 1
     for _ in range(max_tokens - 1):
         step_ids = torch.tensor([ids[-1]], dtype=torch.int32, device=device)
-        logits = _step(STAGE_DECODE, step_ids, seq)
+        logits = runner.decode(step_ids, seq)
         nxt = int(logits[0].argmax().item())
         ids.append(nxt)
         seq += 1
@@ -220,6 +141,7 @@ def main() -> int:
             dist.destroy_process_group()
             return 1
         print("PYPTO_QWEN3_14B_TP2_GENERATE_OK", flush=True)
+        print(COMM_MARKER, "generate_done", flush=True)
     dist.barrier()
     dist.destroy_process_group()
     return 0

@@ -135,6 +135,16 @@
 - 只跑 `torch_npu._npu_matmul_add_fp32`（worker `_warm_up_atb`）后再重放：`FINITE False MAX nan`。占 28 GiB 或 CPU bind 单独都不会。
 - 处理：`PyptoQwen3ForCausalLM` 跳过 ATB warmup。vanilla 默认路径仍 warmup。
 
+### 2026-08-14 阶段 16 — 双卡真 TP，不再 gather 回全宽
+
+- 上一轮把权重 Megatron 切完后又 Gloo gather 回全宽，两卡各跑单卡 fused host，再对 `logits[0,:5120]` 做 allreduce/2。验证判成假 TP。
+- `wo`/`w_down` 按层切 K 维（`shard_stacked_row_parallel`），不再把 stacked `[L*K, out]` 在 dim0 切成「前 20 层 / 后 20 层」。
+- 计算路径只保留本 rank 分片：`wq` last-dim 2560，`wo` `[L*2560, 5120]`。
+- 新 TP host：`pypto_qwen3_tp_kernels.py` 的分片 GEMM + `pypto_qwen3_tp_runner.py` 层循环；`o_proj` / `down_proj` 之后走 Gloo+SHMEM 上的 pypto allreduce。
+- 入口：`examples/offline_pypto_qwen3_14b_tp2.py`；`vLLM.LLM(tp=2)` 仍受 `/dev/shm=64MiB` 限制。
+- GEMM 必须用 M=TOK=32、K=256、N=128：M=1 数值错；K=128 不满足 512B 对齐；N=256 撑爆 L0B。
+- 两次冷启动 greedy 文本都是 `2`；日志里 `PYPTO_QWEN3_ARGS wq=(204800, 2560)`，`boundary=o_proj:*` / `down_proj:*`。
+
 
 ### 2026-08-13 阶段 0 — 对齐接口
 
