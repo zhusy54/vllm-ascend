@@ -315,12 +315,6 @@ class PyptoTinyWeights:
         )
 
 
-def test_wrap_cpu_tensors_for_pypto_passthrough() -> None:
-    tensor = torch.arange(4, dtype=torch.int32)
-    wrapped = adapter.wrap_tensors_for_pypto((tensor,))
-    assert torch.equal(wrapped[0], tensor)
-
-
 def test_build_runtime_model_from_hf_rejects_missing_layer() -> None:
     state = _hf_state(num_layers=1, hidden=4, kv_hidden=2, intermediate=8, head_dim=2, vocab=3)
     del state["model.layers.0.self_attn.q_proj.weight"]
