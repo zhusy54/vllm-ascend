@@ -67,6 +67,12 @@
 - `torch.cat` 40 层 K 还要再申请 12.97 GiB；当时已占用 53.5 / 61.3 GiB。
 - 改成 `compact_vllm_kv_for_contract`：只按 `block_table`/`slot_mapping` 收集用到的 page，映射成紧凑 id，算完 `scatter` 回 vLLM 原页。分页管理仍在 vllm-ascend。
 
+### 2026-08-13 阶段 7 — 第一次真正调到 prefill_fwd
+
+- compact KV 通过；`load_kernels` + 编译成功（约 1 分钟）。
+- 执行时报：`Tensor at position 0 is on npu:0, expected CPU`。
+- pypto L2 runner 只接受 CPU `torch.Tensor` 或 `DeviceTensor`。处理：NPU 张量包成 `DeviceTensor(data_ptr, shape, dtype)`，避免每步 28GiB H2D。
+
 ### 2026-08-13 阶段 0 — 对齐接口
 
 - 读完 `pypto-lib/models/qwen3_14b/{contract,weights,prefill_fwd,decode_fwd}.py` 与 vllm-ascend `AscendAttentionBackend.get_kv_cache_shape`。

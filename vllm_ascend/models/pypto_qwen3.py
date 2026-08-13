@@ -59,6 +59,7 @@ from vllm_ascend.models.pypto_qwen3_adapter import (
     pack_official_weights,
     scatter_contract_kv_to_vllm,
     slice_real_vocab_logits,
+    wrap_tensors_for_pypto,
 )
 
 logger = init_logger(__name__)
@@ -189,7 +190,7 @@ class PyptoQwen3ForCausalLM(nn.Module):
                 logits=logits,
             )
             print(f"PYPTO_QWEN3_STAGE {stage}", flush=True)
-            kernels["prefill_fwd"](*args)
+            kernels["prefill_fwd"](*wrap_tensors_for_pypto(args))
         elif num_decodes > 0 and num_prefills == 0:
             stage = STAGE_DECODE
             sampled_ids_out = token_ids.new_zeros((batch, SAMPLED_IDS_PAD), dtype=torch.int32)
@@ -209,7 +210,7 @@ class PyptoQwen3ForCausalLM(nn.Module):
                 next_hidden=next_hidden,
             )
             print(f"PYPTO_QWEN3_STAGE {stage}", flush=True)
-            kernels["decode_fwd"](*args)
+            kernels["decode_fwd"](*wrap_tensors_for_pypto(args))
         else:
             # Profile / dummy batches: do not pretend a fused host ran.
             self._last_logits = logits[:, :REAL_VOCAB]

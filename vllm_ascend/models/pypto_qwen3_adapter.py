@@ -583,6 +583,31 @@ def build_decode_kernel_args(
     )
 
 
+def wrap_tensors_for_pypto(tensors: Sequence[torch.Tensor]) -> tuple[Any, ...]:
+    """Pack NPU tensors as DeviceTensor so pypto skips H2D/D2H copies.
+
+    The pypto L2 runner rejects ``torch.Tensor`` on NPU (``expected CPU``).
+    A ``DeviceTensor`` around the same ``data_ptr`` keeps the buffer
+    caller-managed. CPU tensors are passed through.
+    """
+    from pypto.runtime.device_tensor import DeviceTensor
+
+    wrapped: list[Any] = []
+    for tensor in tensors:
+        contig = tensor.contiguous()
+        if contig.device.type == "cpu":
+            wrapped.append(contig)
+            continue
+        wrapped.append(
+            DeviceTensor(
+                int(contig.data_ptr()),
+                tuple(int(dim) for dim in contig.shape),
+                contig.dtype,
+            )
+        )
+    return tuple(wrapped)
+
+
 def slice_real_vocab_logits(
     logits: torch.Tensor,
     *,
