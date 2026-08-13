@@ -1,0 +1,275 @@
+#
+# Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# This file is a part of the vllm-ascend project.
+#
+"""CPU tests for the shipped PyPTO Qwen3-14B vLLM adapter."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+import torch
+
+from vllm_ascend.models import pypto_qwen3_adapter as adapter
+
+
+def _hf_state(
+    *,
+    num_layers: int,
+    hidden: int,
+    kv_hidden: int,
+    intermediate: int,
+    head_dim: int,
+    vocab: int,
+) -> dict[str, torch.Tensor]:
+    state: dict[str, torch.Tensor] = {
+        "model.embed_tokens.weight": torch.randn(vocab, hidden),
+        "model.norm.weight": torch.ones(hidden),
+        "lm_head.weight": torch.randn(vocab, hidden),
+    }
+    for layer_idx in range(num_layers):
+        prefix = f"model.layers.{layer_idx}."
+        state[prefix + "input_layernorm.weight"] = torch.ones(hidden)
+        state[prefix + "self_attn.q_proj.weight"] = torch.randn(hidden, hidden)
+        state[prefix + "self_attn.k_proj.weight"] = torch.randn(kv_hidden, hidden)
+        state[prefix + "self_attn.v_proj.weight"] = torch.randn(kv_hidden, hidden)
+        state[prefix + "self_attn.o_proj.weight"] = torch.randn(hidden, hidden)
+        state[prefix + "self_attn.q_norm.weight"] = torch.ones(head_dim)
+        state[prefix + "self_attn.k_norm.weight"] = torch.ones(head_dim)
+        state[prefix + "post_attention_layernorm.weight"] = torch.ones(hidden)
+        state[prefix + "mlp.gate_proj.weight"] = torch.randn(intermediate, hidden)
+        state[prefix + "mlp.up_proj.weight"] = torch.randn(intermediate, hidden)
+        state[prefix + "mlp.down_proj.weight"] = torch.randn(hidden, intermediate)
+    return state
+
+
+def test_flatten_block_table_round_trips_vllm_layout() -> None:
+    batch, max_blocks = 3, 5
+    block_table = torch.arange(batch * max_blocks, dtype=torch.int64).reshape(batch, max_blocks)
+    flat = adapter.flatten_block_table(block_table)
+
+    assert flat.dtype == torch.int32
+    assert tuple(flat.shape) == (batch * max_blocks,)
+    assert adapter.block_table_stride(block_table, batch) == max_blocks
+    torch.testing.assert_close(flat.reshape(batch, max_blocks), block_table.to(torch.int32))
+
+
+def test_normalize_slot_mapping_keeps_page_offset_formula() -> None:
+    page_size = adapter.PAGE_SIZE
+    pages = torch.tensor([0, 3, 7], dtype=torch.int64)
+    offsets = torch.tensor([0, 4, page_size - 1], dtype=torch.int64)
+    slot_mapping = pages * page_size + offsets
+
+    normalized = adapter.normalize_slot_mapping(slot_mapping)
+
+    assert normalized.dtype == torch.int32
+    torch.testing.assert_close(normalized // page_size, pages.to(torch.int32))
+    torch.testing.assert_close(normalized % page_size, offsets.to(torch.int32))
+
+
+def test_prefill_chunk_meta_matches_query_start_loc() -> None:
+    query_start_loc = torch.tensor([0, 4, 4, 11], dtype=torch.int64)
+    chunk_lens, chunk_offsets = adapter.prefill_chunk_meta(query_start_loc)
+
+    torch.testing.assert_close(chunk_offsets, query_start_loc[:-1].to(torch.int32))
+    torch.testing.assert_close(
+        chunk_lens,
+        (query_start_loc[1:] - query_start_loc[:-1]).to(torch.int32),
+    )
+    assert int(chunk_lens.sum().item()) == int(query_start_loc[-1].item())
+
+
+def test_shared_vllm_kv_view_writes_land_in_vllm_pages() -> None:
+    num_layers, num_pages = 3, 2
+    stacked, layers = adapter.allocate_shared_vllm_kv(
+        num_layers=num_layers,
+        num_pages=num_pages,
+        dtype=torch.float32,
+        device="cpu",
+    )
+    key, value, shared = adapter.stack_vllm_kv_as_contract(layers)
+    assert shared
+    marker = 3.25
+    key[0, 0] = marker
+    value[-1, -1] = marker
+
+    viewed_key, viewed_value = adapter.contract_kv_from_stacked(stacked)
+    assert key.data_ptr() == viewed_key.data_ptr()
+    assert float(layers[0][0, 0, 0, 0, 0].item()) == marker
+    assert float(viewed_value[-1, -1].item()) == marker
+    assert tuple(key.shape) == (
+        num_layers * num_pages * adapter.PAGE_SIZE * adapter.NUM_KV_HEADS,
+        adapter.HEAD_DIM,
+    )
+
+
+def test_copy_back_restores_separate_vllm_layers() -> None:
+    layers = [
+        torch.zeros(2, 2, adapter.PAGE_SIZE, adapter.NUM_KV_HEADS, adapter.HEAD_DIM)
+        for _ in range(2)
+    ]
+    key, value, shared = adapter.stack_vllm_kv_as_contract(layers)
+    assert shared is False
+    key.fill_(1.0)
+    value.fill_(2.0)
+    adapter.copy_contract_kv_to_vllm(key, value, layers)
+
+    for layer_kv in layers:
+        layer_key, layer_value = adapter.vllm_layer_kv_views(layer_kv)
+        assert torch.equal(layer_key, torch.ones_like(layer_key))
+        assert torch.equal(layer_value, torch.full_like(layer_value, 2.0))
+
+
+def test_pack_official_weights_uses_prepare_weights_shapes() -> None:
+    num_layers, hidden, head_dim = 2, 8, 4
+    kv_hidden, intermediate, vocab, padded = 4, 16, 5, 8
+    state = _hf_state(
+        num_layers=num_layers,
+        hidden=hidden,
+        kv_hidden=kv_hidden,
+        intermediate=intermediate,
+        head_dim=head_dim,
+        vocab=vocab,
+    )
+    bundle = adapter.pack_official_weights(
+        state.items(),
+        padded_vocab=padded,
+        num_layers=num_layers,
+    )
+
+    assert tuple(bundle.input_rms_weight.shape) == (num_layers, hidden)
+    assert tuple(bundle.wq.shape) == (num_layers * hidden, hidden)
+    assert tuple(bundle.wk.shape) == (num_layers * hidden, kv_hidden)
+    assert tuple(bundle.w_gate.shape) == (num_layers * hidden, intermediate)
+    assert tuple(bundle.w_down.shape) == (num_layers * intermediate, hidden)
+    assert tuple(bundle.padded_lm_head_weight.shape) == (padded, hidden)
+    assert tuple(bundle.padded_embed_weight.shape) == (padded, hidden)
+    assert bundle.padded_lm_head_weight.dtype == torch.bfloat16
+    # Padding rows reuse the first LM-head row so padded logits stay finite.
+    torch.testing.assert_close(
+        bundle.padded_lm_head_weight[vocab:],
+        bundle.padded_lm_head_weight[:1].expand(padded - vocab, -1),
+    )
+    # Kernel layout transposes HF [out, in] weights.
+    torch.testing.assert_close(
+        bundle.wq[:hidden],
+        state["model.layers.0.self_attn.q_proj.weight"].transpose(0, 1).to(torch.bfloat16),
+    )
+
+
+def test_build_prefill_and_decode_args_follow_live_inputs() -> None:
+    batch, tokens, max_blocks = 2, 6, 3
+    input_ids = torch.arange(tokens, dtype=torch.int64)
+    seq_lens = torch.tensor([4, 2], dtype=torch.int64)
+    query_start_loc = torch.tensor([0, 4, 6], dtype=torch.int64)
+    block_table = torch.arange(batch * max_blocks, dtype=torch.int32).reshape(batch, max_blocks)
+    slot_mapping = torch.arange(tokens, dtype=torch.int64) + 10
+    k_cache = torch.zeros(4, adapter.HEAD_DIM, dtype=torch.bfloat16)
+    v_cache = torch.zeros_like(k_cache)
+    weights = PyptoTinyWeights(hidden=4, vocab=8)
+    rope_cos, rope_sin = adapter.build_rope_tables(max_seq=16, head_dim=adapter.HEAD_DIM)
+    logits = torch.zeros(batch, weights.bundle.padded_lm_head_weight.shape[0])
+
+    prefill_args = adapter.build_prefill_kernel_args(
+        input_ids=input_ids,
+        seq_lens=seq_lens,
+        query_start_loc=query_start_loc,
+        block_table=block_table,
+        slot_mapping=slot_mapping,
+        k_cache=k_cache,
+        v_cache=v_cache,
+        weights=weights.bundle,
+        rope_cos=rope_cos,
+        rope_sin=rope_sin,
+        logits=logits,
+    )
+    chunk_lens, chunk_offsets = adapter.prefill_chunk_meta(query_start_loc)
+    assert len(prefill_args) == 25
+    assert prefill_args[0].dtype == torch.int32
+    torch.testing.assert_close(prefill_args[0], input_ids.to(torch.int32))
+    torch.testing.assert_close(prefill_args[1], seq_lens.to(torch.int32))
+    torch.testing.assert_close(prefill_args[2], chunk_lens)
+    torch.testing.assert_close(prefill_args[3], chunk_offsets)
+    torch.testing.assert_close(prefill_args[12], adapter.flatten_block_table(block_table))
+    torch.testing.assert_close(prefill_args[13], adapter.normalize_slot_mapping(slot_mapping))
+    assert prefill_args[14] is k_cache and prefill_args[15] is v_cache
+    assert prefill_args[-1] is logits
+    assert prefill_args[-2] is weights.bundle.padded_embed_weight
+
+    token_ids = torch.tensor([9, 11], dtype=torch.int64)
+    decode_slot = torch.tensor([16, 17], dtype=torch.int64)
+    sampled_out = torch.zeros(batch, adapter.SAMPLED_IDS_PAD, dtype=torch.int32)
+    next_hidden = torch.zeros(batch, 4, dtype=torch.bfloat16)
+    decode_args = adapter.build_decode_kernel_args(
+        token_ids=token_ids,
+        seq_lens=seq_lens,
+        block_table=block_table,
+        slot_mapping=decode_slot,
+        k_cache=k_cache,
+        v_cache=v_cache,
+        weights=weights.bundle,
+        rope_cos=rope_cos,
+        rope_sin=rope_sin,
+        logits=logits,
+        sampled_ids_out=sampled_out,
+        next_hidden=next_hidden,
+    )
+    assert len(decode_args) == 25
+    torch.testing.assert_close(decode_args[6], seq_lens.to(torch.int32))
+    torch.testing.assert_close(decode_args[7], adapter.flatten_block_table(block_table))
+    torch.testing.assert_close(decode_args[8], adapter.normalize_slot_mapping(decode_slot))
+    packed = adapter.pack_sampled_ids(token_ids)
+    torch.testing.assert_close(decode_args[-3], packed)
+    assert decode_args[-2] is sampled_out
+    assert decode_args[-1] is next_hidden
+    sliced = adapter.slice_real_vocab_logits(torch.randn(1, adapter.PADDED_VOCAB))
+    assert sliced.shape[-1] == adapter.REAL_VOCAB
+
+
+class PyptoTinyWeights:
+    def __init__(self, hidden: int, vocab: int) -> None:
+        self.bundle = adapter.PyptoQwen3WeightBundle(
+            input_rms_weight=torch.ones(1, hidden),
+            wq=torch.zeros(hidden, hidden, dtype=torch.bfloat16),
+            wk=torch.zeros(hidden, hidden, dtype=torch.bfloat16),
+            wv=torch.zeros(hidden, hidden, dtype=torch.bfloat16),
+            q_norm_weight=torch.ones(1, adapter.HEAD_DIM),
+            k_norm_weight=torch.ones(1, adapter.HEAD_DIM),
+            wo=torch.zeros(hidden, hidden, dtype=torch.bfloat16),
+            w_gate=torch.zeros(hidden, hidden, dtype=torch.bfloat16),
+            w_up=torch.zeros(hidden, hidden, dtype=torch.bfloat16),
+            w_down=torch.zeros(hidden, hidden, dtype=torch.bfloat16),
+            post_rms_weight=torch.ones(1, hidden),
+            final_norm_weight=torch.ones(1, hidden),
+            padded_lm_head_weight=torch.zeros(vocab, hidden, dtype=torch.bfloat16),
+            padded_embed_weight=torch.zeros(vocab, hidden, dtype=torch.bfloat16),
+        )
+
+
+def test_build_runtime_model_from_hf_rejects_missing_layer() -> None:
+    state = _hf_state(num_layers=1, hidden=4, kv_hidden=2, intermediate=8, head_dim=2, vocab=3)
+    del state["model.layers.0.self_attn.q_proj.weight"]
+    with pytest.raises(KeyError, match="self_attn.q_proj.weight"):
+        adapter.build_runtime_model_from_hf(state, num_layers=1)
+
+
+def test_runtime_model_fields_come_from_the_input_state() -> None:
+    state = _hf_state(num_layers=1, hidden=4, kv_hidden=2, intermediate=8, head_dim=2, vocab=3)
+    model = adapter.build_runtime_model_from_hf(state, num_layers=1)
+    assert isinstance(model, SimpleNamespace)
+    assert model.embed_tokens is state["model.embed_tokens.weight"]
+    assert model.layers[0].wq is state["model.layers.0.self_attn.q_proj.weight"]
+    assert model.final_norm_weight is state["model.norm.weight"]
