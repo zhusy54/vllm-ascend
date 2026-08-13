@@ -260,20 +260,44 @@ def build_rope_tables(
     return emb.cos().to(dtype=dtype), emb.sin().to(dtype=dtype)
 
 
-def vllm_layer_kv_views(layer_kv: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """View one vLLM layer cache ``(2, pages, page, kv_heads, dim)`` as contract rows."""
-    if layer_kv.ndim != 5 or layer_kv.shape[0] != 2:
-        raise ValueError(
-            "expected vLLM layer KV shape (2, num_pages, page_size, num_kv_heads, head_dim), "
-            f"got {tuple(layer_kv.shape)}"
-        )
-    _, num_pages, page_size, num_kv_heads, head_dim = layer_kv.shape
+def split_vllm_layer_kv(layer_kv: Any) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return per-layer ``(k, v)`` each ``(pages, page_size, kv_heads, dim)``.
+
+    vllm-ascend binds either a stacked ``(2, P, S, H, D)`` tensor or a
+    ``(k, v)`` pair of 4-D pages (the allocate path used on this machine).
+    """
+    if isinstance(layer_kv, (list, tuple)):
+        if (
+            len(layer_kv) == 2
+            and all(isinstance(part, torch.Tensor) and part.ndim == 4 for part in layer_kv)
+        ):
+            return layer_kv[0], layer_kv[1]
+        if len(layer_kv) >= 1:
+            return split_vllm_layer_kv(layer_kv[0])
+    if not isinstance(layer_kv, torch.Tensor):
+        raise ValueError(f"unrecognized vLLM layer KV type: {type(layer_kv)!r}")
+    if layer_kv.ndim == 5 and layer_kv.shape[0] == 2:
+        return layer_kv[0], layer_kv[1]
+    raise ValueError(
+        "expected vLLM layer KV as (2, pages, page_size, kv_heads, dim) or "
+        f"(k, v) 4-D pages, got shape {tuple(layer_kv.shape)}"
+    )
+
+
+def flatten_paged_kv(paged: torch.Tensor) -> torch.Tensor:
+    """View ``(pages, page_size, kv_heads, dim)`` as contract ``(P*S*H, D)``."""
+    if paged.ndim != 4:
+        raise ValueError(f"paged KV must be rank 4, got {tuple(paged.shape)}")
+    num_pages, page_size, num_kv_heads, head_dim = paged.shape
     if page_size != PAGE_SIZE:
         raise ValueError(f"vLLM page_size must be {PAGE_SIZE}, got {page_size}")
-    rows = num_pages * page_size * num_kv_heads
-    key = layer_kv[0].reshape(rows, head_dim)
-    value = layer_kv[1].reshape(rows, head_dim)
-    return key, value
+    return paged.reshape(num_pages * page_size * num_kv_heads, head_dim)
+
+
+def vllm_layer_kv_views(layer_kv: Any) -> tuple[torch.Tensor, torch.Tensor]:
+    """View one vLLM layer cache as contract K/V rows."""
+    key, value = split_vllm_layer_kv(layer_kv)
+    return flatten_paged_kv(key), flatten_paged_kv(value)
 
 
 def allocate_shared_vllm_kv(

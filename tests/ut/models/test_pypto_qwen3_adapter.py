@@ -92,6 +92,21 @@ def test_prefill_chunk_meta_matches_query_start_loc() -> None:
     assert int(chunk_lens.sum().item()) == int(query_start_loc[-1].item())
 
 
+def test_split_kv_pair_matches_ascend_allocate_layout() -> None:
+    num_pages = 3
+    key = torch.randn(num_pages, adapter.PAGE_SIZE, adapter.NUM_KV_HEADS, adapter.HEAD_DIM)
+    value = torch.randn_like(key)
+    flat_key, flat_value = adapter.vllm_layer_kv_views((key, value))
+    assert tuple(flat_key.shape) == (
+        num_pages * adapter.PAGE_SIZE * adapter.NUM_KV_HEADS,
+        adapter.HEAD_DIM,
+    )
+    marker = 4.5
+    flat_key[0, 0] = marker
+    assert float(key[0, 0, 0, 0].item()) == marker
+    torch.testing.assert_close(flat_value.reshape_as(value), value)
+
+
 def test_shared_vllm_kv_view_writes_land_in_vllm_pages() -> None:
     num_layers, num_pages = 3, 2
     stacked, layers = adapter.allocate_shared_vllm_kv(

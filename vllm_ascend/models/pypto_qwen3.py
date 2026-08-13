@@ -241,11 +241,7 @@ class PyptoQwen3ForCausalLM(nn.Module):
         layer_kvs: list[torch.Tensor] = []
         for attn in self.attn_layers:
             cache = attn.kv_cache
-            if isinstance(cache, (list, tuple)):
-                if not cache:
-                    raise RuntimeError("vLLM has not bound KV cache onto the pypto Attention layers")
-                cache = cache[0]
-            if cache is None:
+            if cache is None or (isinstance(cache, (list, tuple)) and not cache):
                 raise RuntimeError("vLLM has not bound KV cache onto the pypto Attention layers")
             layer_kvs.append(cache)
         return layer_kvs

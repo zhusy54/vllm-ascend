@@ -54,6 +54,14 @@
 - 同时 `Loading model weights took 0.0040 GB`：打包后的契约权重当时还在 CPU，显存画像会偏小。
 - 处理：`load_weights` 后立刻 `.to(npu)`；没有 metadata / KV 时返回占位 hidden，不调 pypto host。
 
+### 2026-08-13 阶段 5 — KV 实际形状是拆开的 4D
+
+- 引擎起来了：权重 27.52 GiB，KV 24.46 GiB / 160256 tokens（1252 pages × 128）。
+- 第一次真实 generate（22 tokens）在 `stack_vllm_kv_as_contract` 失败：
+  `got (1252, 128, 8, 128)`。
+- 原因：昇腾 allocate 路径是每层 `(k, v)` 两个 4D 页，不是 `(2, P, S, H, D)`。适配层误把 tuple 的 `[0]` 当成 virtual-engine。
+- 处理：`split_vllm_layer_kv` 同时接受 5D stacked 和 `(k, v)` 4D pair。
+
 ### 2026-08-13 阶段 0 — 对齐接口
 
 - 读完 `pypto-lib/models/qwen3_14b/{contract,weights,prefill_fwd,decode_fwd}.py` 与 vllm-ascend `AscendAttentionBackend.get_kv_cache_shape`。
