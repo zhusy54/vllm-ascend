@@ -90,6 +90,11 @@
 - `prefill_fwd.py`：`ATTN_PHASE` / `GATE_UP` / `DOWN_PROJ` / `SILU` 24 → 20。
 - decode 侧 `QWEN3_PA_BLOCK_DIM=20`（`fa_fused` 也是 `sync_start=True`）。
 
+### 2026-08-13 阶段 10 — hard syncall 与 20 核不满编
+
+- 降到 20 后编译失败：`HardSyncallOccupancy`，`qk_pv_skew_probe` 里 hard `syncall` 要求占满编译器认定的 24 core-group。
+- 处理：两处 `sync_start` attention SPMD 改为 `pl.system.available_cluster_count()`，stride 同步。
+
 
 ### 2026-08-13 阶段 0 — 对齐接口
 
