@@ -584,9 +584,18 @@ def build_decode_kernel_args(
 
 
 def invoke_pypto_kernel(kernel: Any, args: Sequence[torch.Tensor]) -> Any:
-    """Specialize from torch tensors, then execute via DeviceTensor views."""
-    compiled = kernel.compile(*args)
-    return compiled(*wrap_tensors_for_pypto(args))
+    """Run a compiled host with CPU tensors (pypto L2 copies H2D/D2H).
+
+    DeviceTensor around a torch NPU pointer is not in the Worker address
+    space and segfaults in ``get_tensor_data``. Keep a CPU mirror, invoke,
+    then copy mutated buffers back to the original device.
+    """
+    cpu_args = [tensor.detach().contiguous().cpu() for tensor in args]
+    result = kernel(*cpu_args)
+    for host, device in zip(cpu_args, args):
+        if device.device.type != "cpu":
+            device.copy_(host.to(device.device, non_blocking=False))
+    return result
 
 
 def wrap_tensors_for_pypto(tensors: Sequence[torch.Tensor]) -> tuple[Any, ...]:

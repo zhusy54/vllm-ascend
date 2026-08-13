@@ -74,6 +74,8 @@
 - pypto L2 runner 只接受 CPU `torch.Tensor` 或 `DeviceTensor`。
 - 直接把 DeviceTensor 传给 `@pl.jit` 会丢掉 shape/dtype，特化失败。
 - 处理：`kernel.compile(*torch_args)` 再用 `compiled(*DeviceTensor)`。
+- DeviceTensor 包 torch NPU `data_ptr` 会在 `get_tensor_data`/`memcpy` 段错误（Worker 地址空间不是 torch 的）。
+- 改回 CPU 入参：权重留在 CPU；NPU 上留一块同尺寸 reservation，避免 KV 池把卡吃满。执行后把 logits/compact KV copy 回 NPU。
 
 ### 2026-08-13 阶段 0 — 对齐接口
 

@@ -100,14 +100,20 @@ class PyptoQwen3ForCausalLM(nn.Module):
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         state = collect_hf_state_dict(weights)
         bundle = pack_official_weights(state.items(), padded_vocab=PADDED_VOCAB)
-        device = torch.device("npu") if torch.npu.is_available() else torch.device("cpu")
-        moved = {name: tensor.to(device=device) for name, tensor in bundle.__dict__.items()}
-        self._bundle = PyptoQwen3WeightBundle(**moved)
-        for name, tensor in moved.items():
+        # pypto L2 execute wants CPU tensors. Keep the contract weights on CPU
+        # and let the runner H2D them. A dummy NPU slab reserves the same
+        # footprint so vLLM does not give the whole card to the KV pool.
+        self._bundle = bundle
+        for name, tensor in bundle.__dict__.items():
             self.register_buffer(name, tensor)
-        self.rope_cos = self.rope_cos.to(device=device)
-        self.rope_sin = self.rope_sin.to(device=device)
-        logger.info("Packed official Qwen3-14B weights into the pypto contract layout on %s", device)
+        weight_bytes = sum(int(tensor.numel() * tensor.element_size()) for tensor in bundle.__dict__.values())
+        if torch.npu.is_available() and weight_bytes > 0:
+            self.register_buffer(
+                "_npu_weight_reservation",
+                torch.empty(weight_bytes, dtype=torch.uint8, device="npu"),
+                persistent=False,
+            )
+        logger.info("Packed official Qwen3-14B weights on CPU (%s bytes reserved on NPU)", weight_bytes)
         return set(state)
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -190,7 +196,7 @@ class PyptoQwen3ForCausalLM(nn.Module):
                 logits=logits,
             )
             print(f"PYPTO_QWEN3_STAGE {stage}", flush=True)
-            kernels["prefill_fwd"](*wrap_tensors_for_pypto(args))
+            invoke_pypto_kernel(kernels["prefill_fwd"], args)
         elif num_decodes > 0 and num_prefills == 0:
             stage = STAGE_DECODE
             sampled_ids_out = token_ids.new_zeros((batch, SAMPLED_IDS_PAD), dtype=torch.int32)
@@ -210,7 +216,7 @@ class PyptoQwen3ForCausalLM(nn.Module):
                 next_hidden=next_hidden,
             )
             print(f"PYPTO_QWEN3_STAGE {stage}", flush=True)
-            kernels["decode_fwd"](*wrap_tensors_for_pypto(args))
+            invoke_pypto_kernel(kernels["decode_fwd"], args)
         else:
             # Profile / dummy batches: do not pretend a fused host ran.
             self._last_logits = logits[:, :REAL_VOCAB]

@@ -53,7 +53,7 @@ def main() -> int:
         tensor_parallel_size=1,
         max_model_len=1024,
         block_size=128,
-        gpu_memory_utilization=0.85,
+        gpu_memory_utilization=0.50,
         dtype="bfloat16",
         enforce_eager=True,
         disable_log_stats=True,
