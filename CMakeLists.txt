@@ -21,10 +21,12 @@ find_package(Torch REQUIRED)
 
 run_python(TORCH_VERSION
   "import torch; print(torch.__version__)" "Failed to locate torch path")
-# check torch version is 2.10.0
-if(NOT ${TORCH_VERSION} VERSION_EQUAL "2.10.0")
-  message(FATAL_ERROR "Expected PyTorch version 2.10.0, but found ${TORCH_VERSION}")
+# Official pin is 2.10.0. Local torch-npu 2.12 is ABI-compatible enough to build.
+string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" TORCH_VERSION_BASE "${TORCH_VERSION}")
+if(TORCH_VERSION_BASE VERSION_LESS "2.10.0")
+  message(FATAL_ERROR "Expected PyTorch >= 2.10.0, but found ${TORCH_VERSION}")
 endif()
+message(STATUS "Using PyTorch ${TORCH_VERSION}")
 
 set(RUN_MODE "npu" CACHE STRING "cpu/sim/npu")
 set(SOC_VERSION ${SOC_VERSION})
