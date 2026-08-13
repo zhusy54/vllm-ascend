@@ -589,9 +589,15 @@ def invoke_pypto_kernel(kernel: Any, args: Sequence[torch.Tensor]) -> Any:
     DeviceTensor around a torch NPU pointer is not in the Worker address
     space and segfaults in ``get_tensor_data``. Keep a CPU mirror, invoke,
     then copy mutated buffers back to the original device.
+
+    Always pass ``platform=a2a3`` so we do not inherit the workspace default
+    ``a2a3sim`` (sim caps ``sync_start`` SPMD at 8 and cannot run prefill).
     """
+    from pypto.runtime import RunConfig
+
     cpu_args = [tensor.detach().contiguous().cpu() for tensor in args]
-    result = kernel(*cpu_args)
+    config = RunConfig(platform="a2a3", device_id=0)
+    result = kernel(*cpu_args, config=config)
     for host, device in zip(cpu_args, args):
         if device.device.type != "cpu":
             device.copy_(host.to(device.device, non_blocking=False))
