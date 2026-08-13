@@ -56,6 +56,15 @@ def _hf_state(
     return state
 
 
+def test_collect_hf_state_dict_owns_cpu_copies() -> None:
+    staging = torch.ones(2, 3)
+    state = adapter.collect_hf_state_dict([("w", staging)])
+    staging.zero_()
+
+    assert state["w"].device.type == "cpu"
+    assert float(state["w"].sum().item()) == 6.0
+
+
 def test_flatten_block_table_round_trips_vllm_layout() -> None:
     batch, max_blocks = 3, 5
     block_table = torch.arange(batch * max_blocks, dtype=torch.int64).reshape(batch, max_blocks)
@@ -170,6 +179,57 @@ def test_compact_kv_only_copies_referenced_pages() -> None:
     adapter.scatter_contract_kv_to_vllm(key, value, layers, phys, page_size=page_size)
     assert float(layers[0][0][2, 0, 0, 0].item()) == 7.0
     assert float(layers[0][0][1, 0, 0, 0].item()) != 7.0
+    # Last page only has 3 live tokens; the unused tail must stay zero.
+    tail = key[3 * kv_heads : rows_per_page]
+    assert float(tail.abs().sum().item()) == 0.0
+
+
+def test_compact_kv_drops_nan_page_tails() -> None:
+    page_size, kv_heads, head_dim = adapter.PAGE_SIZE, 2, 4
+    key = torch.zeros(1, page_size, kv_heads, head_dim)
+    value = torch.zeros_like(key)
+    key[:, 22:] = float("nan")
+    value[:, 22:] = float("nan")
+    key[:, :22] = 1.25
+    value[:, :22] = 0.5
+    layers = [(key, value)]
+    block_table = torch.tensor([[0]], dtype=torch.int32)
+    slot_mapping = torch.arange(22, dtype=torch.int32)
+    seq_lens = torch.tensor([22], dtype=torch.int32)
+
+    packed_k, packed_v, _, _, _ = adapter.compact_vllm_kv_for_contract(
+        layers, block_table, slot_mapping, seq_lens, page_size=page_size
+    )
+    rows_per_page = page_size * kv_heads
+    live = packed_k[: 22 * kv_heads]
+    tail = packed_k[22 * kv_heads : rows_per_page]
+    assert bool(torch.isfinite(packed_k).all())
+    assert bool(torch.isfinite(packed_v).all())
+    assert float(live[0, 0].item()) == 1.25
+    assert float(tail.abs().sum().item()) == 0.0
+
+
+def test_compact_skips_current_chunk_slots() -> None:
+    page_size, kv_heads, head_dim = adapter.PAGE_SIZE, 2, 4
+    key = torch.full((1, page_size, kv_heads, head_dim), float("nan"))
+    value = torch.full_like(key, float("nan"))
+    layers = [(key, value)]
+    block_table = torch.tensor([[0]], dtype=torch.int32)
+    slot_mapping = torch.arange(22, dtype=torch.int32)
+    seq_lens = torch.tensor([22], dtype=torch.int32)
+    chunk_lens = torch.tensor([22], dtype=torch.int32)
+
+    packed_k, packed_v, _, _, _ = adapter.compact_vllm_kv_for_contract(
+        layers,
+        block_table,
+        slot_mapping,
+        seq_lens,
+        page_size=page_size,
+        chunk_lens=chunk_lens,
+    )
+    assert bool(torch.isfinite(packed_k).all())
+    assert bool(torch.isfinite(packed_v).all())
+    assert float(packed_k.abs().sum().item()) == 0.0
 
 
 def test_copy_back_restores_separate_vllm_layers() -> None:
@@ -329,3 +389,75 @@ def test_runtime_model_fields_come_from_the_input_state() -> None:
     assert model.embed_tokens is state["model.embed_tokens.weight"]
     assert model.layers[0].wq is state["model.layers.0.self_attn.q_proj.weight"]
     assert model.final_norm_weight is state["model.norm.weight"]
+
+
+def test_pin_weight_bundle_dtypes_follows_contract() -> None:
+    dirty = adapter.PyptoQwen3WeightBundle(
+        input_rms_weight=torch.ones(1, 4, dtype=torch.bfloat16),
+        wq=torch.zeros(4, 4, dtype=torch.float32),
+        wk=torch.zeros(4, 2, dtype=torch.float32),
+        wv=torch.zeros(4, 2, dtype=torch.float32),
+        q_norm_weight=torch.ones(1, adapter.HEAD_DIM, dtype=torch.bfloat16),
+        k_norm_weight=torch.ones(1, adapter.HEAD_DIM, dtype=torch.bfloat16),
+        wo=torch.zeros(4, 4, dtype=torch.float32),
+        w_gate=torch.zeros(4, 8, dtype=torch.float32),
+        w_up=torch.zeros(4, 8, dtype=torch.float32),
+        w_down=torch.zeros(8, 4, dtype=torch.float32),
+        post_rms_weight=torch.ones(1, 4, dtype=torch.bfloat16),
+        final_norm_weight=torch.ones(1, 4, dtype=torch.bfloat16),
+        padded_lm_head_weight=torch.zeros(8, 4, dtype=torch.float32),
+        padded_embed_weight=torch.zeros(8, 4, dtype=torch.float32),
+    )
+    pinned = adapter.pin_weight_bundle_dtypes(dirty)
+    assert pinned.input_rms_weight.dtype == torch.float32
+    assert pinned.q_norm_weight.dtype == torch.float32
+    assert pinned.final_norm_weight.dtype == torch.float32
+    assert pinned.wq.dtype == torch.bfloat16
+    assert pinned.padded_embed_weight.dtype == torch.bfloat16
+    torch.testing.assert_close(pinned.input_rms_weight, torch.ones(1, 4))
+
+
+def test_materialize_keeps_seq_lens_as_int32_batch_vector() -> None:
+    weights = torch.zeros(2, 2)
+    seq_lens = torch.tensor([22], dtype=torch.int32)
+    chunk_lens = torch.tensor([22], dtype=torch.int32)
+    live = adapter.materialize_npu_args(
+        (weights, seq_lens, chunk_lens),
+        device=torch.device("cpu"),
+    )
+    assert live[1].dtype == torch.int32
+    assert tuple(live[1].shape) == (1,)
+    assert live[2].dtype == torch.int32
+    assert tuple(live[2].shape) == (1,)
+    torch.testing.assert_close(live[1], seq_lens)
+    assert live[1].is_contiguous()
+
+
+def test_wrap_torch_npu_ptr_requires_contiguous_owner() -> None:
+    cpu = torch.arange(4, dtype=torch.int32)
+    wrapped = adapter.wrap_torch_npu_ptr(cpu)
+    assert int(wrapped.data_ptr()) == int(cpu.data_ptr())
+    with pytest.raises(ValueError, match="contiguous"):
+        adapter.wrap_torch_npu_ptr(cpu.as_strided((2,), (2,)))
+
+
+@pytest.mark.skipif(
+    not hasattr(torch, "npu") or not torch.npu.is_available(),
+    reason="torch_npu required to move index tensors onto device pointers",
+)
+def test_materialize_moves_cpu_seq_lens_onto_npu_with_weights() -> None:
+    weights = torch.zeros(2, 2, device="npu", dtype=torch.bfloat16)
+    seq_lens = torch.tensor([22], dtype=torch.int32)
+    chunk_lens = torch.tensor([22], dtype=torch.int32)
+    live = adapter.materialize_npu_args((weights, seq_lens, chunk_lens))
+    assert live[0].device.type == "npu"
+    assert live[1].device.type == "npu"
+    assert live[2].device.type == "npu"
+    assert live[1].dtype == torch.int32
+    assert tuple(live[1].shape) == (1,)
+    assert int(live[1].item()) == 22
+    wrapped = adapter.wrap_torch_npu_ptr(live[1])
+    # DeviceTensor.data_ptr is the raw address, not a method.
+    assert int(wrapped.data_ptr) == int(live[1].data_ptr())
+    assert wrapped.shape == tuple(int(dim) for dim in live[1].shape)
+    assert wrapped.dtype == live[1].dtype

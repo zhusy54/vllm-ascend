@@ -58,9 +58,12 @@ from vllm_ascend.models.pypto_qwen3_adapter import (
     compact_vllm_kv_for_contract,
     ensure_pypto_lib_on_path,
     pack_official_weights,
+    pin_weight_bundle_dtypes,
+    prefill_chunk_meta,
     scatter_contract_kv_to_vllm,
     slice_real_vocab_logits,
     invoke_pypto_kernel,
+    PyptoChipSession,
 )
 
 logger = init_logger(__name__)
@@ -91,37 +94,56 @@ class PyptoQwen3ForCausalLM(nn.Module):
                 for layer_idx in range(NUM_LAYERS)
             ]
         )
+        # Keep RoPE on CPU float32. Registering these as buffers lets
+        # ``LLM(dtype=bfloat16)`` cast them; the fused host expects fp32 tables.
         rope_cos, rope_sin = build_rope_tables(max_seq=MAX_SEQ, head_dim=HEAD_DIM)
-        self.register_buffer("rope_cos", rope_cos, persistent=False)
-        self.register_buffer("rope_sin", rope_sin, persistent=False)
+        self.rope_cos = rope_cos.cpu().float().contiguous()
+        self.rope_sin = rope_sin.cpu().float().contiguous()
         self._bundle: PyptoQwen3WeightBundle | None = None
         self._last_logits: torch.Tensor | None = None
         self._kernels: dict[str, object] | None = None
+        self._chip: PyptoChipSession | None = None
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         state = collect_hf_state_dict(weights)
-        bundle = pack_official_weights(state.items(), padded_vocab=PADDED_VOCAB)
-        # pypto L2 execute wants CPU tensors. Keep the contract weights on CPU
-        # and let the runner H2D them. A dummy NPU slab reserves the same
-        # footprint so vLLM does not give the whole card to the KV pool.
-        self._bundle = bundle
-        for name, tensor in bundle.__dict__.items():
-            self.register_buffer(name, tensor)
-        weight_bytes = sum(int(tensor.numel() * tensor.element_size()) for tensor in bundle.__dict__.values())
-        if torch.npu.is_available() and weight_bytes > 0:
-            self.register_buffer(
-                "_npu_weight_reservation",
-                torch.empty(weight_bytes, dtype=torch.uint8, device="npu"),
-                persistent=False,
+        bundle = pin_weight_bundle_dtypes(
+            pack_official_weights(state.items(), padded_vocab=PADDED_VOCAB)
+        )
+        # Keep contract weights as a Python object, not nn buffers, so
+        # ``LLM(dtype=bfloat16)`` cannot recast RMS / RoPE to bf16.
+        if torch.npu.is_available():
+            bundle = PyptoQwen3WeightBundle(
+                **{name: tensor.to(device="npu") for name, tensor in bundle.__dict__.items()}
             )
-        logger.info("Packed official Qwen3-14B weights on CPU (%s bytes reserved on NPU)", weight_bytes)
+            self.rope_cos = self.rope_cos.float().contiguous().to(device="npu")
+            self.rope_sin = self.rope_sin.float().contiguous().to(device="npu")
+        self._bundle = bundle
+        weight_bytes = sum(int(tensor.numel() * tensor.element_size()) for tensor in bundle.__dict__.values())
+        print(
+            f"PYPTO_QWEN3_WEIGHTS dev={next(iter(bundle.__dict__.values())).device} "
+            f"bytes={weight_bytes} wq={tuple(bundle.wq.shape)}/{bundle.wq.dtype} "
+            f"wq_amax={float(bundle.wq.float().abs().max())} "
+            f"rms={bundle.input_rms_weight.dtype} rope={self.rope_cos.dtype}",
+            flush=True,
+        )
+        logger.info(
+            "Packed official Qwen3-14B weights on %s (%s bytes) wq_absmax=%s",
+            next(iter(bundle.__dict__.values())).device,
+            weight_bytes,
+            float(bundle.wq.float().abs().max()),
+        )
         return set(state)
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         if self._bundle is None:
             raise RuntimeError("PyptoQwen3ForCausalLM.load_weights has not run")
-        self._maybe_move_weights(input_ids.device)
-        return torch.nn.functional.embedding(input_ids, self._bundle.padded_embed_weight)
+        # vLLM only needs this for runner detection / dummy embeds. The fused
+        # host gathers embeddings itself. Do the lookup on CPU so weights stay put.
+        embed = self._bundle.padded_embed_weight
+        ids = input_ids.to(device=embed.device)
+        return torch.nn.functional.embedding(ids, embed).to(
+            device=input_ids.device, dtype=torch.bfloat16
+        )
 
     def forward(
         self,
@@ -135,7 +157,6 @@ class PyptoQwen3ForCausalLM(nn.Module):
             raise RuntimeError("PyptoQwen3ForCausalLM requires input_ids (no inputs_embeds path)")
         if self._bundle is None:
             raise RuntimeError("PyptoQwen3ForCausalLM.load_weights has not run")
-        self._maybe_move_weights(input_ids.device)
 
         dummy = input_ids.new_zeros((input_ids.shape[0], HIDDEN), dtype=torch.bfloat16)
         try:
@@ -165,21 +186,43 @@ class PyptoQwen3ForCausalLM(nn.Module):
             seq_lens = seq_lens[:num_reqs]
             if block_table.ndim == 2:
                 block_table = block_table[:num_reqs]
+                # Drop BlockManager padding. A padded table of length 8 with a
+                # 1-page compact cache makes the kernel think max_blocks=8.
+                need = int(((int(seq_lens.max().item()) + PAGE_SIZE - 1) // PAGE_SIZE))
+                need = max(need, 1)
+                if block_table.shape[1] > need:
+                    block_table = block_table[:, :need]
         batch = int(seq_lens.shape[0])
         query_start_loc = metadata.query_start_loc
         if query_start_loc is None:
             query_start_loc = token_ids.new_tensor([0, num_tokens], dtype=torch.int32)
         else:
             query_start_loc = query_start_loc[: batch + 1]
+        chunk_lens, _chunk_offsets = prefill_chunk_meta(query_start_loc)
 
         k_cache, v_cache, compact_table, compact_slots, phys_pages = compact_vllm_kv_for_contract(
             layer_kvs,
             block_table,
             slot_mapping,
             seq_lens,
+            chunk_lens=chunk_lens,
         )
+        seq_lens = seq_lens.to(dtype=torch.int32).contiguous()
+        token_ids = token_ids.to(dtype=torch.int32).contiguous()
+        query_start_loc = query_start_loc.to(dtype=torch.int32).contiguous()
+        compact_table = compact_table.contiguous()
+        compact_slots = compact_slots.contiguous()
         logits = token_ids.new_zeros((batch, PADDED_VOCAB), dtype=torch.float32)
+        print(
+            f"PYPTO_QWEN3_COMPACT batch={batch} ntok={num_tokens} seq={seq_lens.tolist()} "
+            f"chunk={chunk_lens.detach().cpu().tolist()} table={compact_table.tolist()[:8]} "
+            f"slots={compact_slots[:8].tolist()} ids={token_ids[:8].tolist()} "
+            f"kabs0={float(k_cache.float().abs().max())} "
+            f"dev={k_cache.device} wq_dev={self._bundle.wq.device}",
+            flush=True,
+        )
         kernels = self._ensure_kernels()
+        chip = self._ensure_chip()
 
         if num_prefills > 0 and num_decodes == 0:
             stage = STAGE_PREFILL
@@ -197,7 +240,7 @@ class PyptoQwen3ForCausalLM(nn.Module):
                 logits=logits,
             )
             print(f"PYPTO_QWEN3_STAGE {stage}", flush=True)
-            invoke_pypto_kernel(kernels["prefill_fwd"], args)
+            invoke_pypto_kernel(kernels["prefill_fwd"], args, session=chip)
         elif num_decodes > 0 and num_prefills == 0:
             stage = STAGE_DECODE
             sampled_ids_out = token_ids.new_zeros((batch, SAMPLED_IDS_PAD), dtype=torch.int32)
@@ -217,36 +260,36 @@ class PyptoQwen3ForCausalLM(nn.Module):
                 next_hidden=next_hidden,
             )
             print(f"PYPTO_QWEN3_STAGE {stage}", flush=True)
-            invoke_pypto_kernel(kernels["decode_fwd"], args)
+            invoke_pypto_kernel(kernels["decode_fwd"], args, session=chip)
         else:
             # Profile / dummy batches: do not pretend a fused host ran.
-            self._last_logits = logits[:, :REAL_VOCAB]
+            self._last_logits = logits[:, :REAL_VOCAB].contiguous()
             return dummy
 
         scatter_contract_kv_to_vllm(k_cache, v_cache, layer_kvs, phys_pages)
 
-        self._last_logits = slice_real_vocab_logits(logits)
+        real = slice_real_vocab_logits(logits).contiguous()
+        self._last_logits = real
+        topv, topi = torch.topk(real[0], k=min(4, real.shape[-1]))
+        print(
+            f"PYPTO_QWEN3_LOGITS stage={stage} batch={batch} ntok={num_tokens} "
+            f"seq={seq_lens.tolist()} kabs={float(k_cache.float().abs().max())} "
+            f"argmax={int(real[0].argmax())} top_ids={topi.tolist()} "
+            f"top_val={[float(v) for v in topv]}",
+            flush=True,
+        )
         return input_ids.new_zeros((input_ids.shape[0], HIDDEN), dtype=torch.bfloat16)
 
     def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor | None:
-        del hidden_states
         if self._last_logits is None:
             return None
-        return self._last_logits
-
-    def _maybe_move_weights(self, device: torch.device) -> None:
-        if self.rope_cos.device == device:
-            return
-        self.rope_cos = self.rope_cos.to(device=device)
-        self.rope_sin = self.rope_sin.to(device=device)
-        if self._bundle is None:
-            return
-        moved = {}
-        for name, tensor in self._bundle.__dict__.items():
-            tensor = tensor.to(device=device)
-            setattr(self, name, tensor)
-            moved[name] = tensor
-        self._bundle = PyptoQwen3WeightBundle(**moved)
+        logits = self._last_logits.to(device=hidden_states.device, dtype=torch.float32)
+        if logits.shape[0] != hidden_states.shape[0]:
+            if logits.shape[0] == 1:
+                logits = logits.expand(hidden_states.shape[0], -1).contiguous()
+            else:
+                logits = logits[: hidden_states.shape[0]].contiguous()
+        return logits
 
     def _collect_layer_kvs(self) -> list[torch.Tensor]:
         layer_kvs: list[torch.Tensor] = []
@@ -256,6 +299,11 @@ class PyptoQwen3ForCausalLM(nn.Module):
                 raise RuntimeError("vLLM has not bound KV cache onto the pypto Attention layers")
             layer_kvs.append(cache)
         return layer_kvs
+
+    def _ensure_chip(self) -> PyptoChipSession:
+        if self._chip is None:
+            self._chip = PyptoChipSession()
+        return self._chip
 
     def _ensure_kernels(self) -> dict[str, object]:
         if self._kernels is not None:

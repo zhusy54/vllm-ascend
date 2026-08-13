@@ -95,6 +95,32 @@
 - 降到 20 后编译失败：`HardSyncallOccupancy`，`qk_pv_skew_probe` 里 hard `syncall` 要求占满编译器认定的 24 core-group。
 - 处理：两处 `sync_start` attention SPMD 改为 `pl.system.available_cluster_count()`，stride 同步。
 
+### 2026-08-13 阶段 11 — 通路跑通但输出是 `!::::`
+
+- 冷启动 1 打出 `PYPTO_QWEN3_STAGE` prefill + 32 步 decode，文本是 `!:::::::::::::::::::::::::::::::`。
+- tokenizer：id 0 = `!`，id 25 = `:`。独立 `prefill_probe.py` 用同一套官方权重 + 全零 page，argmax 就是 `2`（logit≈55），说明 fused prefill 数值本身没坏。
+- 探针里 host `k_cache` 全 0：`pl.Out` 会 D2H，但 KV 只标了 `pl.Tensor`，runtime 不当输出拷回。decode 一直在看空 cache。
+- 处理：`prefill_fwd` / `decode_fwd` 的 `k_cache`/`v_cache` 改成 `pl.InOut`（与 contract 文档一致）。探针复查 KABS=119.5、VABS=53，top 仍是 `2`。
+
+### 2026-08-13 阶段 12 — vLLM 路径 logits 全是 NaN
+
+- 接上 InOut 后再走 `LLM.generate`：`PYPTO_QWEN3_LOGITS` 显示 prefill/decode 都是 `kabs=nan`、`top_val=nan`。
+- 独立探针没有 NaN。差别是 vLLM 新分配的 KV 页未清零；attention 按 128 token tile 读整页，mask 位仍是 `0 * NaN = NaN`。
+- 另：权重迭代器可能复用 staging buffer。`collect_hf_state_dict` 改为立刻 `cpu().clone()`。
+- compact 只拷贝 `seq_lens` 覆盖到的 token，未使用尾部保持 0。
+- 用户纠正：pypto 入口吃的是 **heap 上的 device 指针**，不该每次 `kernel(*CPU)` 再 malloc/H2D，更不该拿 torch NPU `data_ptr` 去包 DeviceTensor（地址空间不是 Worker 的）。
+- 用户澄清：pypto heap 只是算子内部 workspace，不是放权重/KV 的地方。入口必须是 **torch_npu tensor 的 data_ptr**（`DeviceTensor(child_memory=True)`）。
+- 小算子验证（`npu_ptr_probe.py`，`x+1`）：CPU 路径和 NPU `data_ptr` 路径都对，maxdiff=0。NPU 路径 `bind.args` 几乎为 0（不再 H2D 用户数据）。
+- 14B 改为：权重量在 npu 上；compile 仍用 CPU 样例；execute 走 `ChipWorker.run(compiled, *DeviceTensor(torch_npu.data_ptr))`。
+
+### 2026-08-14 阶段 13 — 入口全部改成 torch_npu data_ptr
+
+- 独立 `prefill_probe.py`（`PYPTO_PROBE_NPU_PTR=1`）argmax 仍是 `2`；vLLM `LLM.generate` 同一套 DeviceTensor 却是 logits/kabs=NaN，输出 `!!!!`。
+- `seq_lens` / `chunk_lens` **不是 Scalar**：契约是 `[BATCH] int32` 张量。单卡也要传 `tensor([22], int32)`，用 `pl.tensor.dim` / `pl.tensor.read(..., [b])`。
+- 差别是 vLLM metadata 经常把这两个小张量留在 CPU，和 NPU 权重指针混绑。适配层 `materialize_npu_args` 先把**全部**入参（含 `[BATCH] int32`）搬到同一张 NPU 再 `wrap_torch_npu_ptr`。
+- `wrap_torch_npu_ptr` 不再内部 `contiguous()` 出临时对象；调用方必须保住 owner。
+- RMS / QK-norm / RoPE 钉死 fp32；线性/embed 钉死 bf16。离线入口关 V1 多进程，并留出 ChipWorker workspace。
+
 
 ### 2026-08-13 阶段 0 — 对齐接口
 

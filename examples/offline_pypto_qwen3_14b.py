@@ -34,9 +34,14 @@ def main() -> int:
 
     os.environ.setdefault("ASCEND_RT_VISIBLE_DEVICES", "1")
     os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+    # Same process as the working DeviceTensor probe; EngineCore spawn is optional.
+    os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
     os.environ.setdefault("PYPTO_LIB_ROOT", str(Path(INDUCTOR_ROOT) / "pypto-lib"))
     os.environ.setdefault("PTO_PLATFORM", "a2a3")
     os.environ.setdefault("QWEN3_PA_BLOCK_DIM", "20")
+    # Expandable segments make torch_npu pointers unusable as pypto child_memory
+    # for the 14B fused host (standalone probe without this flag is correct).
+    os.environ["PYTORCH_NPU_ALLOC_CONF"] = "expandable_segments:False"
 
     from transformers import AutoTokenizer
     from vllm import LLM, SamplingParams
@@ -55,6 +60,7 @@ def main() -> int:
         max_model_len=1024,
         block_size=128,
         gpu_memory_utilization=0.50,
+        max_num_seqs=1,
         dtype="bfloat16",
         enforce_eager=True,
         disable_log_stats=True,

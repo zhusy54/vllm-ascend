@@ -108,7 +108,9 @@ def collect_hf_state_dict(
     """Materialize a HF-style name -> tensor map from a vLLM weight iterator."""
     state: dict[str, torch.Tensor] = {}
     for name, tensor in weights:
-        state[name] = tensor
+        # vLLM's safetensors iterator reuses a host/NPU staging buffer.
+        # Keep an owned CPU copy so later shards cannot overwrite earlier ones.
+        state[name] = tensor.detach().to(device="cpu").contiguous().clone()
     if not state:
         raise ValueError("HF weight iterator was empty")
     return state
@@ -171,21 +173,23 @@ def pack_official_weights(
         release_layers=False,
     )
     decode = prepared.decode_weights
-    return PyptoQwen3WeightBundle(
-        input_rms_weight=decode["decode_input_rms_weight"],
-        wq=decode["decode_wq"],
-        wk=decode["decode_wk"],
-        wv=decode["decode_wv"],
-        q_norm_weight=decode["decode_q_norm_weight"],
-        k_norm_weight=decode["decode_k_norm_weight"],
-        wo=decode["decode_wo"],
-        w_gate=decode["decode_w_gate"],
-        w_up=decode["decode_w_up"],
-        w_down=decode["decode_w_down"],
-        post_rms_weight=decode["decode_post_rms_weight"],
-        final_norm_weight=prepared.final_norm_weight,
-        padded_lm_head_weight=prepared.padded_lm_head_weight,
-        padded_embed_weight=prepared.padded_embed_weight,
+    return pin_weight_bundle_dtypes(
+        PyptoQwen3WeightBundle(
+            input_rms_weight=decode["decode_input_rms_weight"],
+            wq=decode["decode_wq"],
+            wk=decode["decode_wk"],
+            wv=decode["decode_wv"],
+            q_norm_weight=decode["decode_q_norm_weight"],
+            k_norm_weight=decode["decode_k_norm_weight"],
+            wo=decode["decode_wo"],
+            w_gate=decode["decode_w_gate"],
+            w_up=decode["decode_w_up"],
+            w_down=decode["decode_w_down"],
+            post_rms_weight=decode["decode_post_rms_weight"],
+            final_norm_weight=prepared.final_norm_weight,
+            padded_lm_head_weight=prepared.padded_lm_head_weight,
+            padded_embed_weight=prepared.padded_embed_weight,
+        )
     )
 
 
@@ -367,12 +371,17 @@ def compact_vllm_kv_for_contract(
     seq_lens: torch.Tensor,
     *,
     page_size: int = PAGE_SIZE,
+    chunk_lens: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Copy only referenced vLLM pages into a layer-major contract buffer.
 
     Returns ``(k, v, compact_block_table, compact_slot_mapping, phys_pages)``.
     ``phys_pages[compact_id]`` is the original vLLM page id so the caller can
     scatter writes back. This does not allocate a second block pool.
+
+    When ``chunk_lens`` is set, only *already written* context tokens are
+    copied (``seq_lens - chunk_lens``). The current step's slots stay zero so
+    an uninitialized vLLM page cannot inject NaNs into the fused host.
     """
     phys_pages = referenced_page_ids(
         block_table, slot_mapping, seq_lens, page_size=page_size
@@ -405,15 +414,37 @@ def compact_vllm_kv_for_contract(
     num_layers = len(layer_kvs)
     num_pages = int(phys_pages.numel())
     contract_rows = num_layers * num_pages * rows_per_page
-    key = first_k.new_empty((contract_rows, head_dim))
-    value = first_v.new_empty((contract_rows, head_dim))
+    # Zero-fill, then copy only used tokens. A newly allocated vLLM page may
+    # contain NaNs in the unused tail; attention tiles a full 128-token page
+    # and ``0 * NaN`` stays NaN even for masked positions.
+    key = first_k.new_zeros((contract_rows, head_dim))
+    value = first_v.new_zeros((contract_rows, head_dim))
+    if chunk_lens is None:
+        context_lens = seq
+    else:
+        context_lens = (seq - chunk_lens.to(device=seq.device, dtype=seq.dtype)).clamp(min=0)
+    sb = torch.arange(table.shape[1], device=table.device)
+    toks_in_block = (context_lens.unsqueeze(1) - sb * page_size).clamp(min=0, max=page_size)
+    used_tok = torch.zeros(num_pages, dtype=torch.int64, device=table.device)
+    if bool(valid.any()):
+        used_tok.scatter_reduce_(
+            0,
+            compact_table[valid],
+            toks_in_block[valid],
+            reduce="amax",
+            include_self=True,
+        )
     for layer_idx, layer_kv in enumerate(layer_kvs):
         layer_key, layer_value = split_vllm_layer_kv(layer_kv)
-        dst0 = layer_idx * num_pages * rows_per_page
-        gathered_k = layer_key.index_select(0, phys_pages).reshape(num_pages * rows_per_page, head_dim)
-        gathered_v = layer_value.index_select(0, phys_pages).reshape(num_pages * rows_per_page, head_dim)
-        key[dst0 : dst0 + gathered_k.shape[0]].copy_(gathered_k)
-        value[dst0 : dst0 + gathered_v.shape[0]].copy_(gathered_v)
+        for compact_id in range(num_pages):
+            n_tok = int(used_tok[compact_id].item())
+            if n_tok <= 0:
+                continue
+            phys = phys_pages[compact_id]
+            n_rows = n_tok * num_kv_heads
+            dst0 = layer_idx * num_pages * rows_per_page + compact_id * rows_per_page
+            key[dst0 : dst0 + n_rows].copy_(layer_key[phys, :n_tok].reshape(n_rows, head_dim))
+            value[dst0 : dst0 + n_rows].copy_(layer_value[phys, :n_tok].reshape(n_rows, head_dim))
     return (
         key,
         value,
@@ -440,6 +471,7 @@ def scatter_contract_kv_to_vllm(
     expected = num_layers * num_pages * rows_per_page
     if key.shape[0] != expected or value.shape[0] != expected:
         raise ValueError(f"contract KV rows {tuple(key.shape)} != {expected}")
+    dest_pages = phys_pages.to(device=first_k.device, dtype=torch.int64)
     for layer_idx, layer_kv in enumerate(layer_kvs):
         layer_key, layer_value = split_vllm_layer_kv(layer_kv)
         src0 = layer_idx * num_pages * rows_per_page
@@ -449,8 +481,8 @@ def scatter_contract_kv_to_vllm(
         packed_v = value[src0 : src0 + num_pages * rows_per_page].reshape(
             num_pages, page_size, first_k.shape[-2], head_dim
         )
-        layer_key[phys_pages] = packed_k
-        layer_value[phys_pages] = packed_v
+        layer_key[dest_pages] = packed_k.to(device=layer_key.device, dtype=layer_key.dtype)
+        layer_value[dest_pages] = packed_v.to(device=layer_value.device, dtype=layer_value.dtype)
 
 
 def stack_vllm_kv_as_contract(
@@ -583,25 +615,192 @@ def build_decode_kernel_args(
     )
 
 
-def invoke_pypto_kernel(kernel: Any, args: Sequence[torch.Tensor]) -> Any:
-    """Run a compiled host with CPU tensors (pypto L2 copies H2D/D2H).
+_FP32_WEIGHT_FIELDS = (
+    "input_rms_weight",
+    "q_norm_weight",
+    "k_norm_weight",
+    "post_rms_weight",
+    "final_norm_weight",
+)
+_BF16_WEIGHT_FIELDS = (
+    "wq",
+    "wk",
+    "wv",
+    "wo",
+    "w_gate",
+    "w_up",
+    "w_down",
+    "padded_lm_head_weight",
+    "padded_embed_weight",
+)
 
-    DeviceTensor around a torch NPU pointer is not in the Worker address
-    space and segfaults in ``get_tensor_data``. Keep a CPU mirror, invoke,
-    then copy mutated buffers back to the original device.
 
-    Always pass ``platform=a2a3`` so we do not inherit the workspace default
-    ``a2a3sim`` (sim caps ``sync_start`` SPMD at 8 and cannot run prefill).
+def pin_weight_bundle_dtypes(bundle: PyptoQwen3WeightBundle) -> PyptoQwen3WeightBundle:
+    """Force contract dtypes: RMS / QK-norm stay fp32, linear / embed stay bf16."""
+    fields: dict[str, torch.Tensor] = {}
+    for name, tensor in bundle.__dict__.items():
+        owned = tensor.detach()
+        if name in _FP32_WEIGHT_FIELDS:
+            owned = owned.float()
+        elif name in _BF16_WEIGHT_FIELDS:
+            owned = owned.to(dtype=torch.bfloat16)
+        fields[name] = owned.contiguous()
+    return PyptoQwen3WeightBundle(**fields)
+
+
+def resolve_npu_device(tensors: Sequence[torch.Tensor]) -> torch.device:
+    """Pick the NPU device already holding a kernel argument."""
+    for tensor in tensors:
+        if tensor.device.type == "npu":
+            return tensor.device
+    if hasattr(torch, "npu") and torch.npu.is_available():
+        return torch.device("npu", int(torch.npu.current_device()))
+    raise RuntimeError("PyPTO NPU dispatch needs at least one torch_npu tensor")
+
+
+def materialize_npu_args(
+    args: Sequence[torch.Tensor],
+    device: torch.device | str | None = None,
+) -> list[torch.Tensor]:
+    """Move every argument onto one NPU as a contiguous owner tensor.
+
+    vLLM metadata (``seq_lens`` / ``chunk_lens`` / ``block_table``) often
+    stays on CPU. Mixing those host tensors with ``DeviceTensor`` weight
+    pointers is not the contract the standalone NPU-ptr probe uses.
+    """
+    target = torch.device(device) if device is not None else resolve_npu_device(args)
+    live: list[torch.Tensor] = []
+    for tensor in args:
+        owned = tensor.detach()
+        if owned.device != target:
+            owned = owned.to(device=target, non_blocking=False)
+        if not owned.is_contiguous():
+            owned = owned.contiguous()
+        live.append(owned)
+    return live
+
+
+def describe_kernel_args(args: Sequence[torch.Tensor]) -> str:
+    """Short per-arg device / dtype / finiteness line for launch logs."""
+    parts: list[str] = []
+    for index, tensor in enumerate(args):
+        absmax = float("nan")
+        finite = True
+        if tensor.is_floating_point() and tensor.numel() > 0:
+            probe = tensor.detach()
+            if probe.device.type != "cpu":
+                # One scalar D2H; do not pull the 27GB bundle back.
+                probe_max = probe.float().abs().max()
+                absmax = float(probe_max.item())
+                finite = bool(torch.isfinite(probe_max).item())
+            else:
+                absmax = float(probe.float().abs().max().item())
+                finite = bool(torch.isfinite(probe).all().item())
+        parts.append(
+            f"{index}:{tuple(int(dim) for dim in tensor.shape)}/"
+            f"{tensor.dtype}/{tensor.device}/fin={int(finite)}/amax={absmax:.4g}"
+        )
+    return " ".join(parts)
+
+
+class PyptoChipSession:
+    """Same-process ChipWorker used only to dispatch a compiled host.
+
+    User tensors stay on torch_npu. The compiled entry takes those
+    ``data_ptr`` values as ``DeviceTensor(child_memory=True)``. PyPTO heap
+    is just operator workspace; it must not hold weights / KV / logits.
+    Compile uses CPU samples so the specializer never memcpy's an NPU
+    pointer as host memory.
+    """
+
+    def __init__(self) -> None:
+        from pypto.runtime import ChipWorker, RunConfig
+
+        self.config = RunConfig(platform="a2a3", device_id=0)
+        self.worker = ChipWorker(config=self.config)
+        self._compiled: dict[int, Any] = {}
+        self._live_args: list[torch.Tensor] | None = None
+        self._dumped_kernel_ids: set[int] = set()
+
+    def compile(self, kernel: Any, sample_args: Sequence[torch.Tensor]) -> Any:
+        key = id(kernel)
+        cached = self._compiled.get(key)
+        if cached is not None:
+            return cached
+        cpu_args = [tensor.detach().contiguous().cpu() for tensor in sample_args]
+        compiled = kernel.compile(*cpu_args, config=self.config)
+        self._compiled[key] = compiled
+        return compiled
+
+
+def wrap_torch_npu_ptr(tensor: torch.Tensor) -> Any:
+    """Wrap a contiguous torch_npu tensor as a pypto DeviceTensor.
+
+    The caller must keep *tensor* alive across ``ChipWorker.run``. This
+    helper will not ``contiguous()`` into a temporary that can be freed
+    before dispatch.
+    """
+    from pypto.runtime.device_tensor import DeviceTensor
+
+    if not tensor.is_contiguous():
+        raise ValueError("wrap_torch_npu_ptr requires a contiguous tensor")
+    if tensor.device.type == "cpu":
+        return tensor
+    return DeviceTensor(
+        int(tensor.data_ptr()),
+        tuple(int(dim) for dim in tensor.shape),
+        tensor.dtype,
+    )
+
+
+def invoke_pypto_kernel(
+    kernel: Any,
+    args: Sequence[torch.Tensor],
+    *,
+    session: PyptoChipSession | None = None,
+    resident: Sequence[torch.Tensor] | None = None,
+) -> Any:
+    """Dispatch a compiled host.
+
+    Production path (*session* set): every argument is materialized on
+    torch_npu and passed by ``data_ptr`` (``child_memory=True``). CPU unit
+    tests / probes omit *session* and keep the host-tensor one-shot path.
     """
     from pypto.runtime import RunConfig
 
-    cpu_args = [tensor.detach().contiguous().cpu() for tensor in args]
-    config = RunConfig(platform="a2a3", device_id=0)
-    result = kernel(*cpu_args, config=config)
-    for host, device in zip(cpu_args, args):
-        if device.device.type != "cpu":
-            device.copy_(host.to(device.device, non_blocking=False))
-    return result
+    del resident
+    if session is None:
+        cpu_args = [tensor.detach().contiguous().cpu() for tensor in args]
+        config = RunConfig(platform="a2a3", device_id=0)
+        result = kernel(*cpu_args, config=config)
+        for host, device in zip(cpu_args, args):
+            if device.device.type != "cpu":
+                device.copy_(host.to(device.device, non_blocking=False))
+        return result
+
+    live = materialize_npu_args(args)
+    # DeviceTensor is only a pointer; pin the owners on the session.
+    session._live_args = live
+    if os.environ.get("PYPTO_QWEN3_DUMP_ARGS", "1") != "0":
+        kernel_id = id(kernel)
+        if kernel_id not in session._dumped_kernel_ids:
+            session._dumped_kernel_ids.add(kernel_id)
+            print(f"PYPTO_QWEN3_ARGS {describe_kernel_args(live)}", flush=True)
+    if hasattr(torch, "npu") and torch.npu.is_available():
+        torch.npu.synchronize()
+    compiled = session.compile(kernel, live)
+    dev_args = [wrap_torch_npu_ptr(tensor) for tensor in live]
+    if any(getattr(arg, "device", None) is not None and getattr(arg, "device").type == "cpu" for arg in dev_args):
+        raise RuntimeError("PyPTO session path still has a CPU tensor after NPU materialize")
+    session.worker.run(compiled, *dev_args, config=session.config)
+    if hasattr(torch, "npu") and torch.npu.is_available():
+        torch.npu.synchronize()
+    for src, dest in zip(live, args):
+        if dest.device.type == "cpu":
+            dest.copy_(src.cpu())
+        elif int(src.data_ptr()) != int(dest.data_ptr()):
+            dest.copy_(src)
+    return None
 
 
 def wrap_tensors_for_pypto(tensors: Sequence[torch.Tensor]) -> tuple[Any, ...]:
