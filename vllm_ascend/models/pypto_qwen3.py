@@ -117,6 +117,7 @@ class PyptoQwen3ForCausalLM(nn.Module):
             raise RuntimeError("PyptoQwen3ForCausalLM requires input_ids (no inputs_embeds path)")
         if self._bundle is None:
             raise RuntimeError("PyptoQwen3ForCausalLM.load_weights has not run")
+        self._maybe_move_weights(input_ids.device)
 
         metadata = _unwrap_attn_metadata(get_forward_context().attn_metadata)
         layer_kvs = self._collect_layer_kvs()
@@ -128,20 +129,27 @@ class PyptoQwen3ForCausalLM(nn.Module):
         if seq_lens is None:
             raise RuntimeError("attn metadata is missing seq_lens")
         seq_lens = seq_lens.to(dtype=torch.int32).reshape(-1)
-        batch = int(seq_lens.shape[0])
         slot_mapping = metadata.slot_mapping[:num_tokens]
         block_table = metadata.block_tables
         if block_table is None:
             block_table = getattr(metadata, "block_table", None)
         if block_table is None:
             raise RuntimeError("attn metadata is missing block_tables")
+        num_prefills = int(getattr(metadata, "num_prefills", 0) or 0)
+        num_decodes = int(getattr(metadata, "num_decodes", 0) or 0)
+        num_reqs = num_prefills + num_decodes
+        if num_reqs > 0:
+            seq_lens = seq_lens[:num_reqs]
+            if block_table.ndim == 2:
+                block_table = block_table[:num_reqs]
+        batch = int(seq_lens.shape[0])
         query_start_loc = metadata.query_start_loc
         if query_start_loc is None:
             query_start_loc = token_ids.new_tensor([0, num_tokens], dtype=torch.int32)
+        else:
+            query_start_loc = query_start_loc[: batch + 1]
 
         logits = token_ids.new_zeros((batch, PADDED_VOCAB), dtype=torch.float32)
-        num_prefills = int(getattr(metadata, "num_prefills", 0) or 0)
-        num_decodes = int(getattr(metadata, "num_decodes", 0) or 0)
         kernels = self._ensure_kernels()
 
         if num_prefills > 0 and num_decodes == 0:
@@ -183,7 +191,7 @@ class PyptoQwen3ForCausalLM(nn.Module):
             kernels["decode_fwd"](*args)
         else:
             # Profile / dummy batches: do not pretend a fused host ran.
-            dummy = token_ids.new_zeros((token_ids.shape[0], HIDDEN), dtype=torch.bfloat16)
+            dummy = input_ids.new_zeros((input_ids.shape[0], HIDDEN), dtype=torch.bfloat16)
             self._last_logits = logits[:, :REAL_VOCAB]
             return dummy
 
@@ -191,13 +199,27 @@ class PyptoQwen3ForCausalLM(nn.Module):
             copy_contract_kv_to_vllm(k_cache, v_cache, layer_kvs)
 
         self._last_logits = slice_real_vocab_logits(logits)
-        return token_ids.new_zeros((token_ids.shape[0], HIDDEN), dtype=torch.bfloat16)
+        return input_ids.new_zeros((input_ids.shape[0], HIDDEN), dtype=torch.bfloat16)
 
     def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor | None:
         del hidden_states
         if self._last_logits is None:
             return None
         return self._last_logits
+
+    def _maybe_move_weights(self, device: torch.device) -> None:
+        if self.rope_cos.device == device:
+            return
+        self.rope_cos = self.rope_cos.to(device=device)
+        self.rope_sin = self.rope_sin.to(device=device)
+        if self._bundle is None:
+            return
+        moved = {}
+        for name, tensor in self._bundle.__dict__.items():
+            tensor = tensor.to(device=device)
+            setattr(self, name, tensor)
+            moved[name] = tensor
+        self._bundle = PyptoQwen3WeightBundle(**moved)
 
     def _collect_layer_kvs(self) -> list[torch.Tensor]:
         layer_kvs: list[torch.Tensor] = []
