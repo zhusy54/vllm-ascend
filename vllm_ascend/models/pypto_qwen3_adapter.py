@@ -496,8 +496,10 @@ def _load_prepare_qwen3_weights(pypto_lib_root: Path | None) -> Any:
     return module.prepare_qwen3_weights
 
 
-def _try_recover_stacked(layer_kvs: Sequence[torch.Tensor]) -> torch.Tensor | None:
+def _try_recover_stacked(layer_kvs: Sequence[Any]) -> torch.Tensor | None:
     first = layer_kvs[0]
+    if not isinstance(first, torch.Tensor):
+        return None
     if first.ndim != 5 or first.shape[0] != 2 or first.storage_offset() != 0:
         return None
     num_layers = len(layer_kvs)

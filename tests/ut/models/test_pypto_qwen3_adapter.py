@@ -131,6 +131,20 @@ def test_shared_vllm_kv_view_writes_land_in_vllm_pages() -> None:
     )
 
 
+def test_stack_kv_pairs_does_not_require_5d() -> None:
+    layers = [
+        (
+            torch.zeros(2, adapter.PAGE_SIZE, adapter.NUM_KV_HEADS, adapter.HEAD_DIM),
+            torch.zeros(2, adapter.PAGE_SIZE, adapter.NUM_KV_HEADS, adapter.HEAD_DIM),
+        )
+        for _ in range(2)
+    ]
+    key, value, shared = adapter.stack_vllm_kv_as_contract(layers)
+    assert shared is False
+    assert key.shape[0] == 2 * 2 * adapter.PAGE_SIZE * adapter.NUM_KV_HEADS
+    assert value.shape == key.shape
+
+
 def test_copy_back_restores_separate_vllm_layers() -> None:
     layers = [
         torch.zeros(2, 2, adapter.PAGE_SIZE, adapter.NUM_KV_HEADS, adapter.HEAD_DIM)
