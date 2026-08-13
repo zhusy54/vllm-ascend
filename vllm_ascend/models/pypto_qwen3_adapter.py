@@ -342,15 +342,16 @@ def referenced_page_ids(
 ) -> torch.Tensor:
     """Physical page ids touched by this step (vLLM BlockManager ids)."""
     table = block_table.to(dtype=torch.int64)
+    seq = seq_lens.to(device=table.device, dtype=torch.int64)
     if table.ndim == 1:
-        batch = int(seq_lens.numel())
+        batch = int(seq.numel())
         if table.numel() % batch != 0:
             raise ValueError("flat block_table is not divisible by batch")
         table = table.reshape(batch, -1)
-    blocks_needed = (seq_lens.to(dtype=torch.int64).clamp(min=1) + page_size - 1) // page_size
+    blocks_needed = (seq.clamp(min=1) + page_size - 1) // page_size
     mask = torch.arange(table.shape[1], device=table.device).unsqueeze(0) < blocks_needed.unsqueeze(1)
     pages = table.masked_select(mask)
-    slot_pages = slot_mapping.to(dtype=torch.int64).reshape(-1) // page_size
+    slot_pages = slot_mapping.to(device=table.device, dtype=torch.int64).reshape(-1) // page_size
     pages = torch.cat((pages, slot_pages), dim=0)
     pages = pages[pages >= 0]
     unique_pages = torch.unique(pages, sorted=True)
@@ -385,15 +386,17 @@ def compact_vllm_kv_for_contract(
     page_to_compact[phys_pages] = torch.arange(phys_pages.numel(), device=phys_pages.device)
 
     table = block_table.to(dtype=torch.int64)
+    seq = seq_lens.to(device=table.device, dtype=torch.int64)
     if table.ndim == 1:
-        batch = int(seq_lens.numel())
+        batch = int(seq.numel())
         table = table.reshape(batch, -1)
-    blocks_needed = (seq_lens.to(dtype=torch.int64).clamp(min=1) + page_size - 1) // page_size
+    blocks_needed = (seq.clamp(min=1) + page_size - 1) // page_size
     valid = torch.arange(table.shape[1], device=table.device).unsqueeze(0) < blocks_needed.unsqueeze(1)
     compact_table = torch.zeros_like(table)
     compact_table[valid] = page_to_compact[table[valid]]
-    compact_slots = page_to_compact[slot_mapping.to(dtype=torch.int64).reshape(-1) // page_size]
-    compact_slots = compact_slots * page_size + (slot_mapping.to(dtype=torch.int64).reshape(-1) % page_size)
+    slots = slot_mapping.to(device=phys_pages.device, dtype=torch.int64).reshape(-1)
+    compact_slots = page_to_compact[slots // page_size]
+    compact_slots = compact_slots * page_size + (slots % page_size)
 
     first_k, first_v = split_vllm_layer_kv(layer_kvs[0])
     head_dim = first_k.shape[-1]
