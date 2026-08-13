@@ -47,6 +47,13 @@
 - 原因：vLLM 用 `is_vllm_model` 认生成模型，要求类上有 `embed_input_ids`。缺了就被当成非 generate。
 - 处理：给 `PyptoQwen3ForCausalLM` 补上 `embed_input_ids`（查 embedding 表；真正计算仍在 pypto host 里做）。
 
+### 2026-08-13 阶段 4 — profile_run 无 attn_metadata
+
+- 架构已解析为 `PyptoQwen3ForCausalLM`，8 shard 权重读完。
+- `determine_available_memory` → `profile_run` 在 KV bind 之前 dummy forward，`attn_metadata` 为 None。
+- 同时 `Loading model weights took 0.0040 GB`：打包后的契约权重当时还在 CPU，显存画像会偏小。
+- 处理：`load_weights` 后立刻 `.to(npu)`；没有 metadata / KV 时返回占位 hidden，不调 pypto host。
+
 ### 2026-08-13 阶段 0 — 对齐接口
 
 - 读完 `pypto-lib/models/qwen3_14b/{contract,weights,prefill_fwd,decode_fwd}.py` 与 vllm-ascend `AscendAttentionBackend.get_kv_cache_shape`。

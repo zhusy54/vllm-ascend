@@ -99,10 +99,14 @@ class PyptoQwen3ForCausalLM(nn.Module):
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         state = collect_hf_state_dict(weights)
         bundle = pack_official_weights(state.items(), padded_vocab=PADDED_VOCAB)
-        self._bundle = bundle
-        for name, tensor in bundle.__dict__.items():
+        device = torch.device("npu") if torch.npu.is_available() else torch.device("cpu")
+        moved = {name: tensor.to(device=device) for name, tensor in bundle.__dict__.items()}
+        self._bundle = PyptoQwen3WeightBundle(**moved)
+        for name, tensor in moved.items():
             self.register_buffer(name, tensor)
-        logger.info("Packed official Qwen3-14B weights into the pypto contract layout")
+        self.rope_cos = self.rope_cos.to(device=device)
+        self.rope_sin = self.rope_sin.to(device=device)
+        logger.info("Packed official Qwen3-14B weights into the pypto contract layout on %s", device)
         return set(state)
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -125,8 +129,14 @@ class PyptoQwen3ForCausalLM(nn.Module):
             raise RuntimeError("PyptoQwen3ForCausalLM.load_weights has not run")
         self._maybe_move_weights(input_ids.device)
 
-        metadata = _unwrap_attn_metadata(get_forward_context().attn_metadata)
-        layer_kvs = self._collect_layer_kvs()
+        dummy = input_ids.new_zeros((input_ids.shape[0], HIDDEN), dtype=torch.bfloat16)
+        try:
+            metadata = _unwrap_attn_metadata(get_forward_context().attn_metadata)
+            layer_kvs = self._collect_layer_kvs()
+        except RuntimeError:
+            # profile_run / dummy_run happens before KV pages are bound.
+            self._last_logits = dummy.new_zeros((1, REAL_VOCAB), dtype=torch.float32)
+            return dummy
         k_cache, v_cache, shared = stack_vllm_kv_as_contract(layer_kvs)
 
         num_tokens = int(getattr(metadata, "num_actual_tokens", input_ids.shape[0]))
