@@ -583,6 +583,12 @@ def build_decode_kernel_args(
     )
 
 
+def invoke_pypto_kernel(kernel: Any, args: Sequence[torch.Tensor]) -> Any:
+    """Specialize from torch tensors, then execute via DeviceTensor views."""
+    compiled = kernel.compile(*args)
+    return compiled(*wrap_tensors_for_pypto(args))
+
+
 def wrap_tensors_for_pypto(tensors: Sequence[torch.Tensor]) -> tuple[Any, ...]:
     """Pack NPU tensors as DeviceTensor so pypto skips H2D/D2H copies.
 

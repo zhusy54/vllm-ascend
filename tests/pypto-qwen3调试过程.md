@@ -71,7 +71,9 @@
 
 - compact KV 通过；`load_kernels` + 编译成功（约 1 分钟）。
 - 执行时报：`Tensor at position 0 is on npu:0, expected CPU`。
-- pypto L2 runner 只接受 CPU `torch.Tensor` 或 `DeviceTensor`。处理：NPU 张量包成 `DeviceTensor(data_ptr, shape, dtype)`，避免每步 28GiB H2D。
+- pypto L2 runner 只接受 CPU `torch.Tensor` 或 `DeviceTensor`。
+- 直接把 DeviceTensor 传给 `@pl.jit` 会丢掉 shape/dtype，特化失败。
+- 处理：`kernel.compile(*torch_args)` 再用 `compiled(*DeviceTensor)`。
 
 ### 2026-08-13 阶段 0 — 对齐接口
 

@@ -59,7 +59,7 @@ from vllm_ascend.models.pypto_qwen3_adapter import (
     pack_official_weights,
     scatter_contract_kv_to_vllm,
     slice_real_vocab_logits,
-    wrap_tensors_for_pypto,
+    invoke_pypto_kernel,
 )
 
 logger = init_logger(__name__)
