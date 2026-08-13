@@ -59,7 +59,7 @@ def main() -> int:
         tensor_parallel_size=1,
         max_model_len=1024,
         block_size=128,
-        gpu_memory_utilization=0.50,
+        gpu_memory_utilization=0.48,
         max_num_seqs=1,
         dtype="bfloat16",
         enforce_eager=True,
@@ -69,7 +69,11 @@ def main() -> int:
     )
     outputs = llm.generate(
         [prompt],
-        SamplingParams(temperature=0.0, max_tokens=32, top_p=1.0),
+        SamplingParams(
+            temperature=0.0,
+            max_tokens=int(os.environ.get("PYPTO_MAX_TOKENS", "32")),
+            top_p=1.0,
+        ),
     )
     text = outputs[0].outputs[0].text.strip()
     print("PROMPT:", prompt.replace("\n", "\\n")[:200])

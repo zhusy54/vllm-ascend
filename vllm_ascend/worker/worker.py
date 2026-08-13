@@ -59,6 +59,7 @@ import vllm_ascend.envs as envs_ascend
 from vllm_ascend.ascend_config import get_ascend_config, init_ascend_config
 from vllm_ascend.batch_invariant import init_batch_invariance
 from vllm_ascend.cpu_binding import bind_cpus
+from vllm_ascend.models.pypto_qwen3_adapter import is_pypto_qwen3_architecture
 from vllm_ascend.device_allocator.camem import CaMemAllocator
 from vllm_ascend.device_allocator.sleep_mem_optimized import SleepWakeupManager
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.layerwise_cache_layout import (
@@ -788,9 +789,16 @@ class NPUWorker(WorkerBase):
             logger.info(msg)
 
         # Call ATB matmul to warm up; otherwise, the first operation (ReshapeAndCache)
-        # may cause performance degradation at runtime.
-        if get_ascend_device_type() != AscendDeviceType.A5:
+        # may cause performance degradation at runtime. Skip on the pypto Qwen3
+        # path: ``torch_npu._npu_matmul_add_fp32`` leaves ACL/ATB state that
+        # makes the fused 14B host write NaNs. Isolated replay is finite until
+        # that warmup runs, then argmax/logits become NaN.
+        if get_ascend_device_type() != AscendDeviceType.A5 and not is_pypto_qwen3_architecture(
+            self.model_config
+        ):
             self._warm_up_atb()
+        elif is_pypto_qwen3_architecture(self.model_config):
+            print("PYPTO_QWEN3_SKIP_ATB_WARMUP", flush=True)
         # Bind after warmup so hot allocations are already materialized on the
         # worker process before migratepages/taskset run.
         if get_ascend_config().enable_cpu_binding:

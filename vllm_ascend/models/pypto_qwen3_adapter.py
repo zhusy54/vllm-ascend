@@ -49,6 +49,14 @@ MAX_SEQ = 4096
 ROPE_THETA = 1_000_000.0
 STAGE_PREFILL = "qwen3_14b.prefill_fwd"
 STAGE_DECODE = "qwen3_14b.decode_fwd"
+PYPTO_QWEN3_ARCH = "PyptoQwen3ForCausalLM"
+
+
+def is_pypto_qwen3_architecture(model_config: Any) -> bool:
+    """True when this engine is the selectable pypto Qwen3-14B path."""
+    hf_config = getattr(model_config, "hf_config", None)
+    architectures = getattr(hf_config, "architectures", None) or []
+    return PYPTO_QWEN3_ARCH in architectures
 
 _HF_LAYER_SUFFIXES = (
     ("input_layernorm.weight", "input_rms_weight"),
@@ -113,6 +121,29 @@ def collect_hf_state_dict(
         state[name] = tensor.detach().to(device="cpu").contiguous().clone()
     if not state:
         raise ValueError("HF weight iterator was empty")
+    return state
+
+
+def load_hf_state_from_dir(model_path: str | Path) -> dict[str, torch.Tensor]:
+    """Load official HF shards the same way the working standalone probe does.
+
+    vLLM's weight iterator can hand out NPU / NZ / reused-staging tensors.
+    The fused host needs the dense CPU ND layout ``prepare_qwen3_weights``
+    transposes, so the production path reads the checkpoint files directly.
+    """
+    from safetensors.torch import safe_open
+
+    root = Path(model_path)
+    shards = sorted(root.glob("*.safetensors"))
+    if not shards:
+        raise FileNotFoundError(f"no safetensors shards under {root}")
+    state: dict[str, torch.Tensor] = {}
+    for shard in shards:
+        with safe_open(shard, framework="pt", device="cpu") as handle:
+            for key in handle.keys():
+                state[key] = handle.get_tensor(key)
+    if not state:
+        raise ValueError(f"safetensors shards under {root} were empty")
     return state
 
 
@@ -681,24 +712,12 @@ def materialize_npu_args(
 
 
 def describe_kernel_args(args: Sequence[torch.Tensor]) -> str:
-    """Short per-arg device / dtype / finiteness line for launch logs."""
+    """Short per-arg device / dtype line. Never fp32-cast the 14B weights."""
     parts: list[str] = []
     for index, tensor in enumerate(args):
-        absmax = float("nan")
-        finite = True
-        if tensor.is_floating_point() and tensor.numel() > 0:
-            probe = tensor.detach()
-            if probe.device.type != "cpu":
-                # One scalar D2H; do not pull the 27GB bundle back.
-                probe_max = probe.float().abs().max()
-                absmax = float(probe_max.item())
-                finite = bool(torch.isfinite(probe_max).item())
-            else:
-                absmax = float(probe.float().abs().max().item())
-                finite = bool(torch.isfinite(probe).all().item())
         parts.append(
             f"{index}:{tuple(int(dim) for dim in tensor.shape)}/"
-            f"{tensor.dtype}/{tensor.device}/fin={int(finite)}/amax={absmax:.4g}"
+            f"{tensor.dtype}/{tensor.device}/ptr=0x{int(tensor.data_ptr()):x}"
         )
     return " ".join(parts)
 
@@ -769,6 +788,20 @@ def invoke_pypto_kernel(
     from pypto.runtime import RunConfig
 
     del resident
+    if os.environ.get("PYPTO_QWEN3_SAVE_ARGS") == "1":
+        save_path = Path(
+            os.environ.get(
+                "PYPTO_QWEN3_SAVE_PATH",
+                "/tmp/grok-goal-f89e9f817892/implementer/vllm_prefill_args.pt",
+            )
+        )
+        if not save_path.exists():
+            torch.save([tensor.detach().contiguous().cpu() for tensor in args], save_path)
+            print(
+                f"PYPTO_QWEN3_SAVED_ARGS {save_path} n={len(args)} "
+                f"default_dtype={torch.get_default_dtype()}",
+                flush=True,
+            )
     if session is None:
         cpu_args = [tensor.detach().contiguous().cpu() for tensor in args]
         config = RunConfig(platform="a2a3", device_id=0)

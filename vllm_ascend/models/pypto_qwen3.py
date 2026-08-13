@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -57,6 +58,7 @@ from vllm_ascend.models.pypto_qwen3_adapter import (
     collect_hf_state_dict,
     compact_vllm_kv_for_contract,
     ensure_pypto_lib_on_path,
+    load_hf_state_from_dir,
     pack_official_weights,
     pin_weight_bundle_dtypes,
     prefill_chunk_meta,
@@ -105,7 +107,12 @@ class PyptoQwen3ForCausalLM(nn.Module):
         self._chip: PyptoChipSession | None = None
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        state = collect_hf_state_dict(weights)
+        consumed = collect_hf_state_dict(weights)
+        model_path = getattr(self.vllm_config.model_config, "model", None)
+        if model_path and Path(model_path).is_dir():
+            state = load_hf_state_from_dir(model_path)
+        else:
+            state = consumed
         bundle = pin_weight_bundle_dtypes(
             pack_official_weights(state.items(), padded_vocab=PADDED_VOCAB)
         )
@@ -117,12 +124,27 @@ class PyptoQwen3ForCausalLM(nn.Module):
             )
             self.rope_cos = self.rope_cos.float().contiguous().to(device="npu")
             self.rope_sin = self.rope_sin.float().contiguous().to(device="npu")
+            # Create ChipWorker before vLLM sizes the KV pool. The fused host's
+            # workspace is aclrtMalloc'd at init; if that happens after the
+            #  KV reservation the two heaps fight and prefill writes NaNs.
+            # Replay of the same args outside vLLM is finite (argmax 17).
+            if self._chip is None:
+                torch.npu.empty_cache()
+                self._chip = PyptoChipSession()
+                free, total = torch.npu.mem_get_info()
+                print(
+                    f"PYPTO_QWEN3_CHIP_INIT after_weights "
+                    f"free={free/1024**3:.2f}GiB total={total/1024**3:.2f}GiB",
+                    flush=True,
+                )
         self._bundle = bundle
         weight_bytes = sum(int(tensor.numel() * tensor.element_size()) for tensor in bundle.__dict__.values())
         print(
-            f"PYPTO_QWEN3_WEIGHTS dev={next(iter(bundle.__dict__.values())).device} "
+            f"PYPTO_QWEN3_WEIGHTS src={model_path} "
+            f"dev={next(iter(bundle.__dict__.values())).device} "
             f"bytes={weight_bytes} wq={tuple(bundle.wq.shape)}/{bundle.wq.dtype} "
             f"wq_amax={float(bundle.wq.float().abs().max())} "
+            f"wq_head={bundle.wq.reshape(-1)[:4].float().cpu().tolist()} "
             f"rms={bundle.input_rms_weight.dtype} rope={self.rope_cos.dtype}",
             flush=True,
         )
@@ -132,7 +154,7 @@ class PyptoQwen3ForCausalLM(nn.Module):
             weight_bytes,
             float(bundle.wq.float().abs().max()),
         )
-        return set(state)
+        return set(consumed) | set(state)
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         if self._bundle is None:
@@ -222,7 +244,7 @@ class PyptoQwen3ForCausalLM(nn.Module):
             flush=True,
         )
         kernels = self._ensure_kernels()
-        chip = self._ensure_chip()
+        chip = None if os.environ.get("PYPTO_QWEN3_CPU_INVOKE") == "1" else self._ensure_chip()
 
         if num_prefills > 0 and num_decodes == 0:
             stage = STAGE_PREFILL
@@ -302,6 +324,8 @@ class PyptoQwen3ForCausalLM(nn.Module):
 
     def _ensure_chip(self) -> PyptoChipSession:
         if self._chip is None:
+            if torch.npu.is_available():
+                torch.npu.empty_cache()
             self._chip = PyptoChipSession()
         return self._chip
 

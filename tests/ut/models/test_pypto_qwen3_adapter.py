@@ -56,6 +56,30 @@ def _hf_state(
     return state
 
 
+def test_is_pypto_qwen3_architecture_reads_hf_config() -> None:
+    pypto = SimpleNamespace(hf_config=SimpleNamespace(architectures=["PyptoQwen3ForCausalLM"]))
+    vanilla = SimpleNamespace(hf_config=SimpleNamespace(architectures=["Qwen3ForCausalLM"]))
+    empty = SimpleNamespace(hf_config=SimpleNamespace(architectures=[]))
+    assert adapter.is_pypto_qwen3_architecture(pypto) is True
+    assert adapter.is_pypto_qwen3_architecture(vanilla) is False
+    assert adapter.is_pypto_qwen3_architecture(empty) is False
+
+
+def test_load_hf_state_from_dir_reads_safetensors_files(tmp_path) -> None:
+    from safetensors.torch import save_file
+
+    first = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+    second = torch.ones(2, 2)
+    save_file({"model.embed_tokens.weight": first}, tmp_path / "a.safetensors")
+    save_file({"model.norm.weight": second}, tmp_path / "b.safetensors")
+
+    state = adapter.load_hf_state_from_dir(tmp_path)
+
+    assert set(state) == {"model.embed_tokens.weight", "model.norm.weight"}
+    torch.testing.assert_close(state["model.embed_tokens.weight"], first)
+    torch.testing.assert_close(state["model.norm.weight"], second)
+
+
 def test_collect_hf_state_dict_owns_cpu_copies() -> None:
     staging = torch.ones(2, 3)
     state = adapter.collect_hf_state_dict([("w", staging)])

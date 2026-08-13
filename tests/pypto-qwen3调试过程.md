@@ -121,6 +121,20 @@
 - `wrap_torch_npu_ptr` 不再内部 `contiguous()` 出临时对象；调用方必须保住 owner。
 - RMS / QK-norm / RoPE 钉死 fp32；线性/embed 钉死 bf16。离线入口关 V1 多进程，并留出 ChipWorker workspace。
 
+### 2026-08-14 阶段 14 — ChipWorker 必须在 KV 池之前初始化
+
+- 把 vLLM 第一次 prefill 的 25 个入参存成 `vllm_prefill_args.pt`，进程外 `replay_vllm_args.py`：`FINITE True ARGMAX 17`（token `2`）。参数本身没问题。
+- 同一组参数在 vLLM 进程里跑（CPU 对照和 DeviceTensor）都是 NaN。`default_dtype` 仍是 fp32。
+- 差别是 vLLM 已经占了权重 + KV，ChipWorker 的 heap 后申请，和 torch 缓存分配器抢 HBM。
+- 处理：`load_weights` 把权重量到 NPU 后立刻建 `PyptoChipSession`，赶在 V1 给 KV 池画像/分配之前。生产路径仍是 torch_npu `data_ptr`，`seq_lens`/`chunk_lens` 仍是 `[BATCH] int32`。
+
+### 2026-08-14 阶段 15 — ATB warmup 会把 fused host 打成 NaN
+
+- 申请不到内存会报错；提前建 ChipWorker 后仍剩 32 GiB，还是 NaN，说明不是 malloc 失败。
+- 干净进程 / 只 init HCCL：重放同一组参数 `FINITE ARGMAX 17`。
+- 只跑 `torch_npu._npu_matmul_add_fp32`（worker `_warm_up_atb`）后再重放：`FINITE False MAX nan`。占 28 GiB 或 CPU bind 单独都不会。
+- 处理：`PyptoQwen3ForCausalLM` 跳过 ATB warmup。vanilla 默认路径仍 warmup。
+
 
 ### 2026-08-13 阶段 0 — 对齐接口
 
