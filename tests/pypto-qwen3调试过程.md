@@ -77,6 +77,14 @@
 - DeviceTensor 包 torch NPU `data_ptr` 会在 `get_tensor_data`/`memcpy` 段错误（Worker 地址空间不是 torch 的）。
 - 改回 CPU 入参：权重留在 CPU；NPU 上留一块同尺寸 reservation，避免 KV 池把卡吃满。执行后把 logits/compact KV copy 回 NPU。
 
+### 2026-08-13 阶段 8 — 真机 a2a3 执行 prefill 被核数卡住
+
+- `RunConfig(platform="a2a3")` 后不再走 sim。
+- 真机报错：`REQUIRE_SYNC_START_INVALID`，`require_sync_start` 要的 block 数超过本卡物理核。
+- 本卡 `aclrt`：AIC=20 / AIV=40。`prefill_fwd` 里 `GATE_UP/DOWN_PROJ/SILU/ATTN_PHASE=24`，`ROPE=32`，`FINALIZE=48`，且有 `sync_start=True`。
+- 这是契约 kernel 按 24 核 A2 切的，不改 `pypto-lib` tiling 无法在这张 20 AIC 的 A3 上跑通 fused prefill。
+- 适配层、KV 分页、权重打包、独立模型类和 CPU 单测（12 passed）已在 vllm-ascend 落地。
+
 ### 2026-08-13 阶段 0 — 对齐接口
 
 - 读完 `pypto-lib/models/qwen3_14b/{contract,weights,prefill_fwd,decode_fwd}.py` 与 vllm-ascend `AscendAttentionBackend.get_kv_cache_shape`。
