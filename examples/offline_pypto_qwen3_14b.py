@@ -36,6 +36,7 @@ def main() -> int:
     os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
     os.environ.setdefault("PYPTO_LIB_ROOT", str(Path(INDUCTOR_ROOT) / "pypto-lib"))
     os.environ.setdefault("PTO_PLATFORM", "a2a3")
+    os.environ.setdefault("QWEN3_PA_BLOCK_DIM", "20")
 
     from transformers import AutoTokenizer
     from vllm import LLM, SamplingParams

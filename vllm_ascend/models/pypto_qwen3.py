@@ -25,6 +25,7 @@ module only dispatches those tensors into ``qwen3_14b.prefill_fwd`` and
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable
 
 import torch
@@ -259,6 +260,9 @@ class PyptoQwen3ForCausalLM(nn.Module):
     def _ensure_kernels(self) -> dict[str, object]:
         if self._kernels is not None:
             return self._kernels
+        # decode_fwd attention is pl.spmd(DEFAULT_BLOCK_DIM, sync_start=True).
+        # Must be set before load_kernels() imports paged_attention_cce.
+        os.environ.setdefault("QWEN3_PA_BLOCK_DIM", "20")
         ensure_pypto_lib_on_path()
         from pypto.backend import BackendType, set_backend_type
         from contract.registry import get_contract

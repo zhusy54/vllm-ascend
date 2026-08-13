@@ -85,6 +85,12 @@
 - 这是契约 kernel 按 24 核 A2 切的，不改 `pypto-lib` tiling 无法在这张 20 AIC 的 A3 上跑通 fused prefill。
 - 适配层、KV 分页、权重打包、独立模型类和 CPU 单测（12 passed）已在 vllm-ascend 落地。
 
+### 2026-08-13 阶段 9 — 把 prefill SPMD 降到 20 AIC
+
+- `prefill_fwd.py`：`ATTN_PHASE` / `GATE_UP` / `DOWN_PROJ` / `SILU` 24 → 20。
+- decode 侧 `QWEN3_PA_BLOCK_DIM=20`（`fa_fused` 也是 `sync_start=True`）。
+
+
 ### 2026-08-13 阶段 0 — 对齐接口
 
 - 读完 `pypto-lib/models/qwen3_14b/{contract,weights,prefill_fwd,decode_fwd}.py` 与 vllm-ascend `AscendAttentionBackend.get_kv_cache_shape`。
