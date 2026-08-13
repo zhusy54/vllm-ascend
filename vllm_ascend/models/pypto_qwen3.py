@@ -67,6 +67,24 @@ from vllm_ascend.models.pypto_qwen3_adapter import (
     invoke_pypto_kernel,
     PyptoChipSession,
 )
+from vllm_ascend.models.pypto_qwen3_tp import (
+    COMM_MARKER,
+    build_gloo_shmem_comm,
+    gloo_gather_contract_bundle,
+    shard_contract_bundle,
+    tp_rank_and_world,
+)
+
+
+def _tp_cpu_group():
+    from vllm.distributed.parallel_state import get_tp_group
+
+    group = get_tp_group().cpu_group
+    if group is None:
+        import torch.distributed as dist
+
+        group = dist.group.WORLD
+    return group
 
 logger = init_logger(__name__)
 
@@ -105,6 +123,7 @@ class PyptoQwen3ForCausalLM(nn.Module):
         self._last_logits: torch.Tensor | None = None
         self._kernels: dict[str, object] | None = None
         self._chip: PyptoChipSession | None = None
+        self._tp_comm = None
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         consumed = collect_hf_state_dict(weights)
@@ -116,6 +135,19 @@ class PyptoQwen3ForCausalLM(nn.Module):
         bundle = pin_weight_bundle_dtypes(
             pack_official_weights(state.items(), padded_vocab=PADDED_VOCAB)
         )
+        tp_rank, tp_world = tp_rank_and_world()
+        if tp_world > 1:
+            shard = shard_contract_bundle(bundle, tp_rank, tp_world)
+            print(
+                f"PYPTO_QWEN3_TP_SHARD rank={tp_rank}/{tp_world} "
+                f"wq={tuple(shard.wq.shape)} wo={tuple(shard.wo.shape)} "
+                f"w_down={tuple(shard.w_down.shape)}",
+                flush=True,
+            )
+            group = _tp_cpu_group()
+            bundle = gloo_gather_contract_bundle(
+                shard, rank=tp_rank, world=tp_world, group=group
+            )
         # Keep contract weights as a Python object, not nn buffers, so
         # ``LLM(dtype=bfloat16)`` cannot recast RMS / RoPE to bf16.
         if torch.npu.is_available():
@@ -291,6 +323,13 @@ class PyptoQwen3ForCausalLM(nn.Module):
         scatter_contract_kv_to_vllm(k_cache, v_cache, layer_kvs, phys_pages)
 
         real = slice_real_vocab_logits(logits).contiguous()
+        tp_rank, tp_world = tp_rank_and_world()
+        if tp_world > 1:
+            comm = self._ensure_tp_comm(real.device)
+            reduced = comm.allreduce_sum(real[0, :HIDDEN])
+            real = real.clone()
+            real[0, :HIDDEN] = reduced.to(dtype=real.dtype) / tp_world
+            print(COMM_MARKER, f"stage={stage} rank={tp_rank}", flush=True)
         self._last_logits = real
         topv, topi = torch.topk(real[0], k=min(4, real.shape[-1]))
         print(
@@ -321,6 +360,21 @@ class PyptoQwen3ForCausalLM(nn.Module):
                 raise RuntimeError("vLLM has not bound KV cache onto the pypto Attention layers")
             layer_kvs.append(cache)
         return layer_kvs
+
+    def _ensure_tp_comm(self, device: torch.device):
+        if self._tp_comm is not None:
+            return self._tp_comm
+        rank, world = tp_rank_and_world()
+        group = _tp_cpu_group()
+        self._tp_comm = build_gloo_shmem_comm(
+            rank=rank,
+            world_size=world,
+            device=str(device),
+            cols=HIDDEN,
+            group=group,
+            session=self._ensure_chip(),
+        )
+        return self._tp_comm
 
     def _ensure_chip(self) -> PyptoChipSession:
         if self._chip is None:
@@ -355,8 +409,8 @@ class PyptoQwen3ForCausalLM(nn.Module):
         block_size = int(vllm_config.cache_config.block_size)
         max_model_len = int(vllm_config.model_config.max_model_len)
         tp = int(vllm_config.parallel_config.tensor_parallel_size)
-        if tp != 1:
-            raise ValueError(f"PyptoQwen3ForCausalLM is single-card only, got tp={tp}")
+        if tp not in (1, 2):
+            raise ValueError(f"PyptoQwen3ForCausalLM supports tp=1 or tp=2, got tp={tp}")
         if block_size != PAGE_SIZE:
             raise ValueError(f"PyptoQwen3ForCausalLM requires block_size={PAGE_SIZE}, got {block_size}")
         if max_model_len > MAX_SEQ:

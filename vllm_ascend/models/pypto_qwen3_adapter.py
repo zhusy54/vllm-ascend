@@ -732,10 +732,12 @@ class PyptoChipSession:
     pointer as host memory.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, device_id: int | None = None) -> None:
         from pypto.runtime import ChipWorker, RunConfig
 
-        self.config = RunConfig(platform="a2a3", device_id=0)
+        if device_id is None:
+            device_id = int(os.environ.get("LOCAL_RANK", "0"))
+        self.config = RunConfig(platform="a2a3", device_id=int(device_id))
         self.worker = ChipWorker(config=self.config)
         self._compiled: dict[int, Any] = {}
         self._live_args: list[torch.Tensor] | None = None
