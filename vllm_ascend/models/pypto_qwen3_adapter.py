@@ -24,9 +24,12 @@ reshapes / packs those tensors for ``qwen3_14b.prefill_fwd`` and
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import shutil
 import sys
 from collections.abc import Iterable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -140,7 +143,7 @@ def load_hf_state_from_dir(model_path: str | Path) -> dict[str, torch.Tensor]:
     state: dict[str, torch.Tensor] = {}
     for shard in shards:
         with safe_open(shard, framework="pt", device="cpu") as handle:
-            for key in handle.keys():
+            for key in handle.keys():  # noqa: SIM118 - safetensors safe_open is not iterable
                 state[key] = handle.get_tensor(key)
     if not state:
         raise ValueError(f"safetensors shards under {root} were empty")
@@ -742,6 +745,31 @@ class PyptoChipSession:
         self._compiled: dict[int, Any] = {}
         self._live_args: list[torch.Tensor] | None = None
         self._dumped_kernel_ids: set[int] = set()
+        self.swimlane_capture_dir: Path | None = None
+        self.launch_tag: str = ""
+        self.swimlane_seq: int = 0
+
+    def capture_dfx(self, compiled: Any) -> None:
+        """Copy this launch's L2 records so the next run cannot overwrite them."""
+        dest_root = self.swimlane_capture_dir
+        if dest_root is None:
+            return
+        output_dir = getattr(compiled, "output_dir", None)
+        if output_dir is None:
+            print(f"PYPTO_QWEN3_SWIMLANE_MISS {self.launch_tag} no-output-dir", flush=True)
+            return
+        src = Path(output_dir) / "dfx_outputs" / "l2_swimlane_records.json"
+        if not src.is_file():
+            print(f"PYPTO_QWEN3_SWIMLANE_MISS {self.launch_tag} {src}", flush=True)
+            return
+        tag = (self.launch_tag or "chip").replace(":", "_").replace("/", "_")
+        dest = dest_root / f"{self.swimlane_seq:04d}_{tag}"
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest / "l2_swimlane_records.json")
+        (dest / "meta.json").write_text(
+            json.dumps({"seq": self.swimlane_seq, "tag": tag, "src": str(src)}, indent=2)
+        )
+        self.swimlane_seq += 1
 
     def compile(self, kernel: Any, sample_args: Sequence[torch.Tensor]) -> Any:
         key = id(kernel)
@@ -749,7 +777,18 @@ class PyptoChipSession:
         if cached is not None:
             return cached
         cpu_args = [tensor.detach().contiguous().cpu() for tensor in sample_args]
-        compiled = kernel.compile(*cpu_args, config=self.config)
+        # PyPTO's default artifact name has only second-level precision.  Two
+        # torchrun ranks compiling the same kernel otherwise overwrite the same
+        # .pto/.so/report tree concurrently.
+        previous_dir = self.config.save_kernels_dir
+        kernel_name = getattr(kernel, "__name__", "pypto_kernel")
+        rank = os.environ.get("LOCAL_RANK", "0")
+        base = Path(os.environ.get("PYPTO_QWEN3_BUILD_DIR", "build_output"))
+        self.config.save_kernels_dir = str(base / f"{kernel_name}_rank{rank}_pid{os.getpid()}")
+        try:
+            compiled = kernel.compile(*cpu_args, config=self.config)
+        finally:
+            self.config.save_kernels_dir = previous_dir
         self._compiled[key] = compiled
         return compiled
 
@@ -825,9 +864,13 @@ def invoke_pypto_kernel(
         torch.npu.synchronize()
     compiled = session.compile(kernel, live)
     dev_args = [wrap_torch_npu_ptr(tensor) for tensor in live]
-    if any(getattr(arg, "device", None) is not None and getattr(arg, "device").type == "cpu" for arg in dev_args):
+    if any(
+        (device := getattr(arg, "device", None)) is not None and device.type == "cpu"
+        for arg in dev_args
+    ):
         raise RuntimeError("PyPTO session path still has a CPU tensor after NPU materialize")
     session.worker.run(compiled, *dev_args, config=session.config)
+    session.capture_dfx(compiled)
     if hasattr(torch, "npu") and torch.npu.is_available():
         torch.npu.synchronize()
     for src, dest in zip(live, args):
@@ -889,10 +932,8 @@ def _load_prepare_qwen3_weights(pypto_lib_root: Path | None) -> Any:
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
     finally:
-        try:
+        with suppress(ValueError):
             sys.path.remove(str(variant_dir))
-        except ValueError:
-            pass
     return module.prepare_qwen3_weights
 
 

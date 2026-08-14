@@ -13,7 +13,8 @@ Launch::
 
 Does not use vLLM EngineCore (this container's /dev/shm is 64MiB).
 Each rank keeps its Megatron shard (``wq`` last-dim 2560) and runs the
-TP host. pypto allreduce is used after ``o_proj`` and ``down_proj``.
+TP host. The one-``ChipWorker.run`` fused prefill/decode host is the default;
+set ``PYPTO_QWEN3_TP_FUSED=0`` to use the Python runner as a fallback.
 """
 
 from __future__ import annotations
@@ -33,6 +34,17 @@ def _sanitize_sys_path() -> None:
             continue
         cleaned.append(entry)
     sys.path[:] = cleaned
+
+
+def _select_rank0_token(logits, *, rank: int, torch, dist) -> tuple[int, bool]:
+    """Broadcast rank 0's token while retaining a local-logits correctness check."""
+    local_token = int(logits[0].argmax().item())
+    selected = torch.zeros((), dtype=torch.int32)
+    if rank == 0:
+        selected.fill_(local_token)
+    dist.broadcast(selected, src=0)
+    token = int(selected.item())
+    return token, local_token == token
 
 
 def main() -> int:
@@ -61,6 +73,8 @@ def main() -> int:
     )
     from vllm_ascend.models.pypto_qwen3_tp_runner import PyptoTpRunner
 
+    use_fused = os.environ.get("PYPTO_QWEN3_TP_FUSED", "1") == "1"
+
     if not Path(MODEL_PATH).exists():
         print(f"model path missing: {MODEL_PATH}", file=sys.stderr)
         return 2
@@ -81,8 +95,11 @@ def main() -> int:
     device = f"npu:{local_rank}"
 
     tok = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
+    prompt_text = os.environ.get("PYPTO_PROMPT", "用两句话介绍北京。")
+    expected_text = os.environ.get("PYPTO_EXPECT_TEXT", "北京")
+    min_output_tokens = int(os.environ.get("PYPTO_MIN_OUTPUT_TOKENS", "8"))
     prompt = tok.apply_chat_template(
-        [{"role": "user", "content": "1+1等于几？只回答数字。"}],
+        [{"role": "user", "content": prompt_text}],
         tokenize=False,
         add_generation_prompt=True,
         enable_thinking=False,
@@ -117,31 +134,67 @@ def main() -> int:
         group=dist.group.WORLD,
         session=session,
     )
-    runner = PyptoTpRunner(shard, comm, session, rope_cos, rope_sin)
+    if use_fused:
+        from vllm_ascend.models.pypto_qwen3_tp_fused import PyptoTpFusedHost
+
+        runner = PyptoTpFusedHost(shard, comm, session, rope_cos, rope_sin)
+        print("PYPTO_QWEN3_TP_PATH fused", flush=True)
+    else:
+        runner = PyptoTpRunner(shard, comm, session, rope_cos, rope_sin)
+        print("PYPTO_QWEN3_TP_PATH runner", flush=True)
     runner.compile()
 
     logits = runner.prefill(input_ids.to(device))
-    next_id = int(logits[0].argmax().item())
+    next_id, rank_logits_match = _select_rank0_token(
+        logits,
+        rank=rank,
+        torch=torch,
+        dist=dist,
+    )
     ids = [next_id]
     max_tokens = int(os.environ.get("PYPTO_MAX_TOKENS", "32"))
     seq = ntok + 1
     for _ in range(max_tokens - 1):
         step_ids = torch.tensor([ids[-1]], dtype=torch.int32, device=device)
         logits = runner.decode(step_ids, seq)
-        nxt = int(logits[0].argmax().item())
+        nxt, step_match = _select_rank0_token(
+            logits,
+            rank=rank,
+            torch=torch,
+            dist=dist,
+        )
+        rank_logits_match = rank_logits_match and step_match
         ids.append(nxt)
         seq += 1
         if nxt == tok.eos_token_id:
             break
     text = tok.decode(ids, skip_special_tokens=True).strip()
+    local_ok = (
+        rank_logits_match
+        and len(ids) >= min_output_tokens
+        and (not expected_text or expected_text in text)
+    )
+    global_ok = torch.tensor(int(local_ok), dtype=torch.int32)
+    dist.all_reduce(global_ok, op=dist.ReduceOp.MIN)
     if rank == 0:
+        print(f"OUTPUT_TOKENS: {len(ids)}", flush=True)
         print("OUTPUT:", text, flush=True)
-        if "2" not in text:
-            print("greedy text does not contain 2", file=sys.stderr)
-            dist.destroy_process_group()
-            return 1
-        print("PYPTO_QWEN3_14B_TP2_GENERATE_OK", flush=True)
-        print(COMM_MARKER, "generate_done", flush=True)
+        if len(ids) < min_output_tokens:
+            print(
+                f"greedy output has {len(ids)} tokens, expected at least {min_output_tokens}",
+                file=sys.stderr,
+            )
+        if expected_text and expected_text not in text:
+            print(f"greedy text does not contain {expected_text!r}", file=sys.stderr)
+    if not rank_logits_match:
+        print(f"rank {rank} logits disagreed with rank 0 token selection", file=sys.stderr)
+    if rank == 0:
+        if int(global_ok.item()) == 1:
+            print("PYPTO_QWEN3_14B_TP2_GENERATE_OK", flush=True)
+            print(COMM_MARKER, "generate_done", flush=True)
+    if int(global_ok.item()) != 1:
+        dist.destroy_process_group()
+        return 1
     dist.barrier()
     dist.destroy_process_group()
     return 0

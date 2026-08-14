@@ -59,7 +59,6 @@ import vllm_ascend.envs as envs_ascend
 from vllm_ascend.ascend_config import get_ascend_config, init_ascend_config
 from vllm_ascend.batch_invariant import init_batch_invariance
 from vllm_ascend.cpu_binding import bind_cpus
-from vllm_ascend.models.pypto_qwen3_adapter import is_pypto_qwen3_architecture
 from vllm_ascend.device_allocator.camem import CaMemAllocator
 from vllm_ascend.device_allocator.sleep_mem_optimized import SleepWakeupManager
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.layerwise_cache_layout import (
@@ -72,6 +71,7 @@ from vllm_ascend.distributed.kv_transfer.sparse_kv_offload.sparse_kv_offload_man
     get_host_device_memory_usage_ratio,
 )
 from vllm_ascend.distributed.parallel_state import init_ascend_model_parallel
+from vllm_ascend.models.pypto_qwen3_adapter import is_pypto_qwen3_architecture
 from vllm_ascend.ops.triton.triton_utils import init_device_properties_triton
 from vllm_ascend.profiler.torch_npu_profiler import TorchNPUProfilerWrapper
 from vllm_ascend.utils import (
@@ -790,9 +790,11 @@ class NPUWorker(WorkerBase):
 
         # Call ATB matmul to warm up; otherwise, the first operation (ReshapeAndCache)
         # may cause performance degradation at runtime. Skip on the pypto Qwen3
-        # path: ``torch_npu._npu_matmul_add_fp32`` leaves ACL/ATB state that
-        # makes the fused 14B host write NaNs. Isolated replay is finite until
-        # that warmup runs, then argmax/logits become NaN.
+        # path: ``torch_npu._npu_matmul_add_fp32`` selects ATB's AIC atomic
+        # accumulation kernel, which does not restore the atomic mode before
+        # returning. The first non-atomic AIC store in the fused 14B host then
+        # inherits atomic-add mode and writes NaNs. Device synchronization does
+        # not reset this mode; keep the warmup disabled until ATB restores it.
         if get_ascend_device_type() != AscendDeviceType.A5 and not is_pypto_qwen3_architecture(
             self.model_config
         ):

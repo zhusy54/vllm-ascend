@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -28,6 +29,8 @@ from vllm_ascend.models.pypto_qwen3_adapter import (
 COMM_MARKER = "PYPTO_QWEN3_COMM gloo+shmem+pypto_allreduce"
 TP_WORLD = 2
 TP_TOK_PAD = 32
+TP_SIGNAL_ROWS = TP_WORLD
+TP_SIGNAL_COLS = 1
 STAGE_TP_PREFILL = "qwen3_14b.tp_prefill_fwd"
 STAGE_TP_DECODE = "qwen3_14b.tp_decode_fwd"
 TP_BOUNDARY_O_PROJ = "o_proj"
@@ -82,15 +85,11 @@ def shard_stacked_row_parallel(
     if tensor.ndim != 2:
         raise ValueError(f"expected rank-2 stacked weight, got {tuple(tensor.shape)}")
     if tensor.shape[0] % rows_per_layer != 0:
-        raise ValueError(
-            f"stacked dim0 {tensor.shape[0]} is not a multiple of rows_per_layer {rows_per_layer}"
-        )
+        raise ValueError(f"stacked dim0 {tensor.shape[0]} is not a multiple of rows_per_layer {rows_per_layer}")
     num_layers = int(tensor.shape[0]) // rows_per_layer
     layered = tensor.reshape(num_layers, rows_per_layer, tensor.shape[-1])
     width = rows_per_layer // world
-    return layered[:, rank * width : (rank + 1) * width].reshape(
-        num_layers * width, tensor.shape[-1]
-    ).contiguous()
+    return layered[:, rank * width : (rank + 1) * width].reshape(num_layers * width, tensor.shape[-1]).contiguous()
 
 
 def _bundle_num_layers(bundle: PyptoQwen3WeightBundle) -> int:
@@ -129,9 +128,7 @@ def layer_stacked_view(tensor: torch.Tensor, layer: int, num_layers: int) -> tor
     if not 0 <= layer < num_layers:
         raise ValueError(f"layer {layer} out of range for num_layers={num_layers}")
     if tensor.shape[0] % num_layers != 0:
-        raise ValueError(
-            f"stacked dim0 {tensor.shape[0]} is not divisible by num_layers {num_layers}"
-        )
+        raise ValueError(f"stacked dim0 {tensor.shape[0]} is not divisible by num_layers {num_layers}")
     rows = int(tensor.shape[0]) // num_layers
     return tensor.narrow(0, layer * rows, rows)
 
@@ -149,9 +146,7 @@ def shard_contract_bundle(
             fields[name] = shard_last_dim(tensor, rank, world)
         elif name in _ROW_FIELDS:
             rows_per_layer = int(tensor.shape[0]) // num_layers
-            fields[name] = shard_stacked_row_parallel(
-                tensor, rank, world, rows_per_layer=rows_per_layer
-            )
+            fields[name] = shard_stacked_row_parallel(tensor, rank, world, rows_per_layer=rows_per_layer)
         else:
             fields[name] = tensor.contiguous()
     return PyptoQwen3WeightBundle(**fields)
@@ -175,8 +170,7 @@ def gloo_gather_contract_bundle(
         dist.all_gather(bufs, cpu, group=group)
         gathered_by_name[name] = bufs
     shards = [
-        PyptoQwen3WeightBundle(**{name: gathered_by_name[name][src] for name in shard.__dict__})
-        for src in range(world)
+        PyptoQwen3WeightBundle(**{name: gathered_by_name[name][src] for name in shard.__dict__}) for src in range(world)
     ]
     return gather_contract_bundle(shards)
 
@@ -198,9 +192,9 @@ def gather_contract_bundle(
             width = int(pieces[0].shape[0]) // num_layers
             rows_per_layer = width * world
             layered = [part.reshape(num_layers, width, part.shape[-1]) for part in pieces]
-            fields[name] = torch.cat(layered, dim=1).reshape(
-                num_layers * rows_per_layer, pieces[0].shape[-1]
-            ).contiguous()
+            fields[name] = (
+                torch.cat(layered, dim=1).reshape(num_layers * rows_per_layer, pieces[0].shape[-1]).contiguous()
+            )
         else:
             fields[name] = pieces[0].contiguous()
     del world
@@ -219,7 +213,15 @@ def tp_allreduce_slot_plan(
         raise ValueError(f"rows must be >= 1, got {rows}")
     elem = torch.empty((), dtype=dtype).element_size()
     payload = rows * cols * elem
-    return ("data_buf", "out_buf"), (payload, payload)
+    signal = TP_SIGNAL_ROWS * TP_SIGNAL_COLS * 4
+    return ("data_buf", "signal"), (payload, signal)
+
+
+def tp_compile_output_dir(program: str) -> str:
+    """Give each torchrun rank/process its own PyPTO compiler output directory."""
+    base = Path(os.environ.get("PYPTO_QWEN3_BUILD_DIR", "build_output"))
+    rank = os.environ.get("LOCAL_RANK", "0")
+    return str(base / f"{program}_rank{rank}_pid{os.getpid()}")
 
 
 def _compile_allreduce_kernels(
@@ -275,8 +277,116 @@ def _compile_allreduce_kernels(
         return allreduce_step(data, out)
 
     meta = torch.empty((TP_TOK_PAD, HIDDEN), dtype=torch.float32)
-    cfg = RunConfig(platform=platform, device_id=0)
-    return publish_chip.compile(meta, meta, config=cfg), allreduce_chip.compile(meta, meta, config=cfg)
+    publish_cfg = RunConfig(
+        platform=platform,
+        device_id=0,
+        save_kernels_dir=tp_compile_output_dir("tp_publish_chip"),
+    )
+    allreduce_cfg = RunConfig(
+        platform=platform,
+        device_id=0,
+        save_kernels_dir=tp_compile_output_dir("tp_allreduce_chip"),
+    )
+    return (
+        publish_chip.compile(meta, meta, config=publish_cfg),
+        allreduce_chip.compile(meta, meta, config=allreduce_cfg),
+    )
+
+
+def _compile_fused_allreduce(platform: str = "a2a3") -> Any:
+    """One chip: store local partial, device-side allreduce, write the sum."""
+    import pypto.language as pl
+    import pypto.language.distributed as pld
+    from pypto.runtime import RunConfig
+
+    @pl.jit.incore
+    def fused_allreduce_step(
+        inp: pl.Tensor[[TP_TOK_PAD, HIDDEN], pl.FP32],
+        data: pl.InOut[pld.DistributedTensor[[TP_TOK_PAD, HIDDEN], pl.FP32]],
+        signal: pl.InOut[pld.DistributedTensor[[TP_WORLD, 1], pl.INT32]],
+        out: pl.InOut[pl.Tensor[[TP_TOK_PAD, HIDDEN], pl.FP32]],
+        expected_publish: pl.Scalar[pl.INDEX],
+        expected_consume: pl.Scalar[pl.INDEX],
+    ):
+        for t in pl.range(TP_TOK_PAD):
+            data = pl.store(pl.load(inp, [t, 0], [1, HIDDEN]), [t, 0], data)
+        ctx = pld.get_comm_ctx(data)
+        my_rank = pld.rank(ctx)
+        nranks = pld.nranks(ctx)
+        peer = (my_rank + 1) % nranks
+        pld.system.notify(
+            signal,
+            peer=peer,
+            offsets=[my_rank, 0],
+            value=1,
+            op=pld.NotifyOp.AtomicAdd,
+        )
+        pld.system.wait(
+            signal=signal,
+            offsets=[peer, 0],
+            expected=expected_publish,
+            cmp=pld.WaitCmp.Ge,
+        )
+        for t in pl.range(TP_TOK_PAD):
+            local = pl.load(data, [t, 0], [1, HIDDEN])
+            remote = pld.tile.remote_load(data, peer=peer, offsets=[t, 0], shape=[1, HIDDEN])
+            out = pl.store(pl.add(local, remote), [t, 0], out)
+        pld.system.notify(
+            signal,
+            peer=peer,
+            offsets=[my_rank, 0],
+            value=1,
+            op=pld.NotifyOp.AtomicAdd,
+        )
+        pld.system.wait(
+            signal=signal,
+            offsets=[peer, 0],
+            expected=expected_consume,
+            cmp=pld.WaitCmp.Ge,
+        )
+        return out
+
+    def fused_allreduce_chip(
+        inp: pl.Tensor[[TP_TOK_PAD, HIDDEN], pl.FP32],
+        data: pl.InOut[pld.DistributedTensor[[TP_TOK_PAD, HIDDEN], pl.FP32]],
+        signal: pl.InOut[pld.DistributedTensor[[TP_WORLD, 1], pl.INT32]],
+        out: pl.InOut[pl.Tensor[[TP_TOK_PAD, HIDDEN], pl.FP32]],
+        expected_publish: pl.Scalar[pl.INDEX],
+        expected_consume: pl.Scalar[pl.INDEX],
+    ):
+        return fused_allreduce_step(
+            inp,
+            data,
+            signal,
+            out,
+            expected_publish,
+            expected_consume,
+        )
+
+    # This module deliberately imports PyPTO lazily.  With postponed Python
+    # annotations, ``pl``/``pld`` therefore are not in the function globals
+    # that signature-mode compilation consults.  Resolve the public signature
+    # before decorating so the two credits can remain true runtime scalars.
+    fused_allreduce_chip.__annotations__ = {
+        "inp": pl.Tensor[[TP_TOK_PAD, HIDDEN], pl.FP32],
+        "data": pl.InOut[pld.DistributedTensor[[TP_TOK_PAD, HIDDEN], pl.FP32]],
+        "signal": pl.InOut[pld.DistributedTensor[[TP_WORLD, 1], pl.INT32]],
+        "out": pl.InOut[pl.Tensor[[TP_TOK_PAD, HIDDEN], pl.FP32]],
+        "expected_publish": pl.Scalar[pl.INDEX],
+        "expected_consume": pl.Scalar[pl.INDEX],
+    }
+    fused_allreduce_chip = pl.jit(fused_allreduce_chip)
+
+    cfg = RunConfig(
+        platform=platform,
+        device_id=0,
+        save_kernels_dir=tp_compile_output_dir("tp_fused_allreduce_chip"),
+    )
+    return fused_allreduce_chip.compile(
+        expected_publish=pl.RUNTIME,
+        expected_consume=pl.RUNTIME,
+        config=cfg,
+    )
 
 
 def _dispatch_chip(session: PyptoChipSession, compiled: Any, *values: Any) -> None:
@@ -296,7 +406,20 @@ def _dispatch_chip(session: PyptoChipSession, compiled: Any, *values: Any) -> No
             args.add_tensor(make_tensor_arg(host))
     for val in scalars:
         args.add_scalar(int(val))
-    session.worker._run_chip(compiled.chip_callable, args, compiled.build_call_config())
+    dfx_dir = None
+    if session.config.any_dfx_enabled():
+        dfx_dir = Path(compiled.output_dir) / "dfx_outputs"
+        dfx_dir.mkdir(parents=True, exist_ok=True)
+    cfg = compiled.build_call_config(session.config, dfx_dir=dfx_dir)
+    # torch_npu and ChipWorker own different execution streams.  Finish all
+    # pointer-backed input writes before handing ownership to the compiled
+    # graph, then make its output visible before Python reuses those buffers.
+    if hasattr(torch, "npu") and torch.npu.is_available():
+        torch.npu.synchronize()
+    session.worker._run_chip(compiled.chip_callable, args, cfg)
+    if hasattr(torch, "npu") and torch.npu.is_available():
+        torch.npu.synchronize()
+    session.capture_dfx(compiled)
 
 
 @dataclass
@@ -309,9 +432,22 @@ class PyptoGlooShmemComm:
     session: PyptoChipSession
     publish: Any
     allreduce: Any
+    fused: Any
     cols: int
     rows: int
     group: Any
+    signal_credit: int = 0
+
+    def reserve_signal_credits(self, count: int) -> int:
+        """Reserve monotonically increasing INT32 signal credits and return the old base."""
+        if count < 1:
+            raise ValueError(f"signal credit count must be positive, got {count}")
+        next_credit = self.signal_credit + count
+        if next_credit > torch.iinfo(torch.int32).max:
+            raise OverflowError(f"signal credit would overflow INT32: base={self.signal_credit}, count={count}")
+        base = self.signal_credit
+        self.signal_credit = next_credit
+        return base
 
     def allreduce_sum(self, tensor: torch.Tensor, *, boundary: str = "hidden") -> torch.Tensor:
         """Sum-allreduce of ``[..., HIDDEN]`` via pypto. Pads the token axis to ``rows``."""
@@ -326,22 +462,34 @@ class PyptoGlooShmemComm:
                 self.allreduce_sum(live[start : start + self.rows], boundary=boundary)
                 for start in range(0, n_rows, self.rows)
             ]
-            return torch.cat(chunks, dim=0).reshape(tensor.shape).to(
-                device=tensor.device, dtype=tensor.dtype
-            )
+            return torch.cat(chunks, dim=0).reshape(tensor.shape).to(device=tensor.device, dtype=tensor.dtype)
         payload = torch.zeros((self.rows, self.cols), dtype=torch.float32, device=live.device)
         payload[:n_rows].copy_(live)
         data_dt = self.window.as_device_tensor("data_buf", (self.rows, self.cols), torch.float32)
         out_torch = torch.zeros((self.rows, self.cols), dtype=torch.float32, device=payload.device)
-        _dispatch_chip(self.session, self.publish, payload, data_dt, int(self.window.device_ctx_ptr))
-        dist.barrier(group=self.group)
-        _dispatch_chip(
-            self.session,
-            self.allreduce,
-            data_dt,
-            wrap_torch_npu_ptr(out_torch) if out_torch.device.type != "cpu" else out_torch,
-            int(self.window.device_ctx_ptr),
-        )
+        prev_tag = self.session.launch_tag
+        safe = boundary.replace(":", "_")
+        payload_arg = wrap_torch_npu_ptr(payload) if payload.device.type != "cpu" else payload
+        try:
+            self.session.launch_tag = f"{safe}.publish"
+            _dispatch_chip(
+                self.session,
+                self.publish,
+                payload_arg,
+                data_dt,
+                int(self.window.device_ctx_ptr),
+            )
+            dist.barrier(group=self.group)
+            self.session.launch_tag = f"{safe}.allreduce"
+            _dispatch_chip(
+                self.session,
+                self.allreduce,
+                data_dt,
+                wrap_torch_npu_ptr(out_torch) if out_torch.device.type != "cpu" else out_torch,
+                int(self.window.device_ctx_ptr),
+            )
+        finally:
+            self.session.launch_tag = prev_tag
         dist.barrier(group=self.group)
         print(
             COMM_MARKER,
@@ -350,6 +498,60 @@ class PyptoGlooShmemComm:
         )
         result = out_torch[:n_rows].to(device=tensor.device, dtype=tensor.dtype)
         return result.reshape(tensor.shape)
+
+    def allreduce_sum_fused(self, tensor: torch.Tensor, *, boundary: str = "hidden") -> torch.Tensor:
+        """Sum-allreduce in one ChipWorker.run. No host barrier between publish and reduce."""
+        if tensor.shape[-1] != self.cols:
+            raise ValueError(f"allreduce width {tensor.shape[-1]} != compiled cols {self.cols}")
+        live = tensor.detach().float().reshape(-1, self.cols).contiguous()
+        n_rows = int(live.shape[0])
+        if n_rows > self.rows:
+            chunks = [
+                self.allreduce_sum_fused(live[start : start + self.rows], boundary=boundary)
+                for start in range(0, n_rows, self.rows)
+            ]
+            return torch.cat(chunks, dim=0).reshape(tensor.shape).to(device=tensor.device, dtype=tensor.dtype)
+        payload = torch.zeros((self.rows, self.cols), dtype=torch.float32, device=live.device)
+        payload[:n_rows].copy_(live)
+        data_dt = self.window.as_device_tensor("data_buf", (self.rows, self.cols), torch.float32)
+        signal_dt = self.window.as_device_tensor("signal", (TP_WORLD, 1), torch.int32)
+        out_torch = torch.zeros((self.rows, self.cols), dtype=torch.float32, device=payload.device)
+        prev_tag = self.session.launch_tag
+        self.session.launch_tag = f"{boundary.replace(':', '_')}.fused_allreduce"
+        ctx = int(self.window.device_ctx_ptr)
+        credit_base = self.reserve_signal_credits(2)
+        try:
+            _dispatch_chip(
+                self.session,
+                self.fused,
+                wrap_torch_npu_ptr(payload) if payload.device.type != "cpu" else payload,
+                data_dt,
+                signal_dt,
+                wrap_torch_npu_ptr(out_torch) if out_torch.device.type != "cpu" else out_torch,
+                credit_base + 1,
+                credit_base + 2,
+                ctx,
+                ctx,
+            )
+        finally:
+            self.session.launch_tag = prev_tag
+        print(
+            COMM_MARKER,
+            f"fused boundary={boundary} rank={self.rank} rows={n_rows} cols={self.cols}",
+            flush=True,
+        )
+        result = out_torch[:n_rows].to(device=tensor.device, dtype=tensor.dtype)
+        return result.reshape(tensor.shape)
+
+
+def _zero_window_slot(window: Any, slot: str, nbytes: int) -> None:
+    """Zero exactly one carved SHMEM slot before device-side credit waits begin."""
+    if nbytes < 1:
+        raise ValueError(f"slot nbytes must be positive, got {nbytes}")
+    if slot not in window.offsets:
+        raise KeyError(f"unknown SHMEM slot {slot!r}; have {sorted(window.offsets)}")
+    offset = int(window.offsets[slot])
+    window.tensor[offset : offset + nbytes].zero_()
 
 
 def build_gloo_shmem_comm(
@@ -380,9 +582,14 @@ def build_gloo_shmem_comm(
         slot_nbytes=nbytes,
         group_name=group_name,
     )
+    signal_nbytes = nbytes[names.index("signal")]
+    _zero_window_slot(window, "signal", signal_nbytes)
+    torch.npu.synchronize()
+    dist.barrier(group=group)
     chip = session or PyptoChipSession()
     platform = os.environ.get("PTO_PLATFORM", "a2a3")
     publish, allreduce = _compile_allreduce_kernels(cols, rows=rows, platform=platform)
+    fused = _compile_fused_allreduce(platform=platform)
     return PyptoGlooShmemComm(
         rank=rank,
         world_size=world_size,
@@ -390,6 +597,7 @@ def build_gloo_shmem_comm(
         session=chip,
         publish=publish,
         allreduce=allreduce,
+        fused=fused,
         cols=cols,
         rows=rows,
         group=group,

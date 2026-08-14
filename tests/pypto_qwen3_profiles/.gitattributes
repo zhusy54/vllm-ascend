@@ -1,0 +1,3 @@
+# Ascend profiler exports contain significant tabs/CRLF in generated tables.
+# Preserve the raw capture byte-for-byte and do not apply source diff rules.
+tp2/torch/prof/** binary

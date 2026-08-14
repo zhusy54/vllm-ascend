@@ -17,7 +17,6 @@ from vllm_ascend.models.pypto_qwen3_adapter import (
     NUM_HEADS,
     NUM_KV_HEADS,
     PADDED_VOCAB,
-    REAL_VOCAB,
     invoke_pypto_kernel,
     slice_real_vocab_logits,
 )
@@ -129,7 +128,7 @@ class PyptoTpRunner:
         self._logged_args = False
 
     def compile(self) -> None:
-        from vllm_ascend.models.pypto_qwen3_tp_kernels import TP_GEMM_KERNELS, TOK
+        from vllm_ascend.models.pypto_qwen3_tp_kernels import TOK, TP_GEMM_KERNELS
 
         if self._kernels is not None:
             return
@@ -153,7 +152,10 @@ class PyptoTpRunner:
 
     def prefill(self, input_ids: torch.Tensor) -> torch.Tensor:
         print(f"PYPTO_QWEN3_STAGE {STAGE_TP_PREFILL}", flush=True)
-        hidden = F.embedding(input_ids.reshape(-1).to(device=self.shard.padded_embed_weight.device), self.shard.padded_embed_weight)
+        hidden = F.embedding(
+            input_ids.reshape(-1).to(device=self.shard.padded_embed_weight.device),
+            self.shard.padded_embed_weight,
+        )
         hidden = self._forward_layers(hidden, pos0=0, causal=True)
         return self._logits(hidden[-1:])
 
@@ -186,9 +188,9 @@ class PyptoTpRunner:
         for layer in range(self.num_layers):
             residual = hidden
             xn = rmsnorm(hidden, layer_stacked_view(self.shard.input_rms_weight, layer, self.num_layers))
-            q = self._gemm("q", xn, layer_stacked_view(self.shard.wq, layer, self.num_layers))
-            k = self._gemm("kv", xn, layer_stacked_view(self.shard.wk, layer, self.num_layers))
-            v = self._gemm("kv", xn, layer_stacked_view(self.shard.wv, layer, self.num_layers))
+            q = self._gemm("q", xn, layer_stacked_view(self.shard.wq, layer, self.num_layers), tag=f"L{layer:02d}.q")
+            k = self._gemm("kv", xn, layer_stacked_view(self.shard.wk, layer, self.num_layers), tag=f"L{layer:02d}.k")
+            v = self._gemm("kv", xn, layer_stacked_view(self.shard.wv, layer, self.num_layers), tag=f"L{layer:02d}.v")
             q = q.view(n_tok, HEADS_TP, HEAD_DIM)
             k = k.view(n_tok, KV_HEADS_TP, HEAD_DIM)
             v = v.view(n_tok, KV_HEADS_TP, HEAD_DIM)
@@ -215,18 +217,30 @@ class PyptoTpRunner:
                 "o",
                 attn.reshape(n_tok, HIDDEN_TP),
                 layer_stacked_view(self.shard.wo, layer, self.num_layers),
+                tag=f"L{layer:02d}.o",
             )
             hidden = residual + self.comm.allreduce_sum(
                 o_partial, boundary=f"{TP_BOUNDARY_O_PROJ}:{layer}"
             ).to(dtype=residual.dtype)
             residual = hidden
             xn = rmsnorm(hidden, layer_stacked_view(self.shard.post_rms_weight, layer, self.num_layers))
-            gate = self._gemm("gate_up", xn, layer_stacked_view(self.shard.w_gate, layer, self.num_layers))
-            up = self._gemm("gate_up", xn, layer_stacked_view(self.shard.w_up, layer, self.num_layers))
+            gate = self._gemm(
+                "gate_up",
+                xn,
+                layer_stacked_view(self.shard.w_gate, layer, self.num_layers),
+                tag=f"L{layer:02d}.gate",
+            )
+            up = self._gemm(
+                "gate_up",
+                xn,
+                layer_stacked_view(self.shard.w_up, layer, self.num_layers),
+                tag=f"L{layer:02d}.up",
+            )
             down_partial = self._gemm(
                 "down",
                 F.silu(gate) * up,
                 layer_stacked_view(self.shard.w_down, layer, self.num_layers),
+                tag=f"L{layer:02d}.down",
             )
             hidden = residual + self.comm.allreduce_sum(
                 down_partial, boundary=f"{TP_BOUNDARY_DOWN_PROJ}:{layer}"
@@ -234,7 +248,7 @@ class PyptoTpRunner:
         print(COMM_MARKER, f"layers={self.num_layers} tokens={n_tok} pos0={pos0}", flush=True)
         return hidden
 
-    def _gemm(self, name: str, left: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    def _gemm(self, name: str, left: torch.Tensor, weight: torch.Tensor, *, tag: str | None = None) -> torch.Tensor:
         from vllm_ascend.models.pypto_qwen3_tp_kernels import TOK
 
         if self._kernels is None:
@@ -252,7 +266,12 @@ class PyptoTpRunner:
         left_pad = left.new_zeros((TOK, left.shape[1]))
         left_pad[:n_tok].copy_(left)
         out_pad = torch.zeros((TOK, weight.shape[1]), dtype=torch.float32, device=left.device)
-        invoke_pypto_kernel(kernel, (left_pad, weight, out_pad), session=self.session)
+        prev = self.session.launch_tag
+        self.session.launch_tag = tag or name
+        try:
+            invoke_pypto_kernel(kernel, (left_pad, weight, out_pad), session=self.session)
+        finally:
+            self.session.launch_tag = prev
         return out_pad[:n_tok]
 
 

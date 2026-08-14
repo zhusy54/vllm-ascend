@@ -28,7 +28,7 @@ INTER_K_BLOCKS = INTER_TP // K_CHUNK
 INTER_N_BLOCKS = INTER_TP // N_CHUNK
 
 
-@pl.jit.incore
+@pl.jit.inline
 def gemm_h_htp_step(
     left: pl.Tensor[[TOK, HIDDEN], pl.BF16],
     weight: pl.Tensor[[HIDDEN, HIDDEN_TP], pl.BF16],
@@ -52,8 +52,8 @@ def gemm_h_htp_step(
     return out
 
 
-@pl.jit
-def gemm_h_htp_chip(
+@pl.jit.incore
+def gemm_h_htp_incore(
     left: pl.Tensor[[TOK, HIDDEN], pl.BF16],
     weight: pl.Tensor[[HIDDEN, HIDDEN_TP], pl.BF16],
     out: pl.InOut[pl.Tensor[[TOK, HIDDEN_TP], pl.FP32]],
@@ -61,7 +61,16 @@ def gemm_h_htp_chip(
     return gemm_h_htp_step(left, weight, out)
 
 
-@pl.jit.incore
+@pl.jit
+def gemm_h_htp_chip(
+    left: pl.Tensor[[TOK, HIDDEN], pl.BF16],
+    weight: pl.Tensor[[HIDDEN, HIDDEN_TP], pl.BF16],
+    out: pl.InOut[pl.Tensor[[TOK, HIDDEN_TP], pl.FP32]],
+):
+    return gemm_h_htp_incore(left, weight, out)
+
+
+@pl.jit.inline
 def gemm_h_kv_step(
     left: pl.Tensor[[TOK, HIDDEN], pl.BF16],
     weight: pl.Tensor[[HIDDEN, KV_HIDDEN_TP], pl.BF16],
@@ -85,8 +94,8 @@ def gemm_h_kv_step(
     return out
 
 
-@pl.jit
-def gemm_h_kv_chip(
+@pl.jit.incore
+def gemm_h_kv_incore(
     left: pl.Tensor[[TOK, HIDDEN], pl.BF16],
     weight: pl.Tensor[[HIDDEN, KV_HIDDEN_TP], pl.BF16],
     out: pl.InOut[pl.Tensor[[TOK, KV_HIDDEN_TP], pl.FP32]],
@@ -94,7 +103,16 @@ def gemm_h_kv_chip(
     return gemm_h_kv_step(left, weight, out)
 
 
-@pl.jit.incore
+@pl.jit
+def gemm_h_kv_chip(
+    left: pl.Tensor[[TOK, HIDDEN], pl.BF16],
+    weight: pl.Tensor[[HIDDEN, KV_HIDDEN_TP], pl.BF16],
+    out: pl.InOut[pl.Tensor[[TOK, KV_HIDDEN_TP], pl.FP32]],
+):
+    return gemm_h_kv_incore(left, weight, out)
+
+
+@pl.jit.inline
 def gemm_htp_h_step(
     left: pl.Tensor[[TOK, HIDDEN_TP], pl.BF16],
     weight: pl.Tensor[[HIDDEN_TP, HIDDEN], pl.BF16],
@@ -118,8 +136,8 @@ def gemm_htp_h_step(
     return out
 
 
-@pl.jit
-def gemm_htp_h_chip(
+@pl.jit.incore
+def gemm_htp_h_incore(
     left: pl.Tensor[[TOK, HIDDEN_TP], pl.BF16],
     weight: pl.Tensor[[HIDDEN_TP, HIDDEN], pl.BF16],
     out: pl.InOut[pl.Tensor[[TOK, HIDDEN], pl.FP32]],
@@ -127,7 +145,16 @@ def gemm_htp_h_chip(
     return gemm_htp_h_step(left, weight, out)
 
 
-@pl.jit.incore
+@pl.jit
+def gemm_htp_h_chip(
+    left: pl.Tensor[[TOK, HIDDEN_TP], pl.BF16],
+    weight: pl.Tensor[[HIDDEN_TP, HIDDEN], pl.BF16],
+    out: pl.InOut[pl.Tensor[[TOK, HIDDEN], pl.FP32]],
+):
+    return gemm_htp_h_incore(left, weight, out)
+
+
+@pl.jit.inline
 def gemm_h_inter_step(
     left: pl.Tensor[[TOK, HIDDEN], pl.BF16],
     weight: pl.Tensor[[HIDDEN, INTER_TP], pl.BF16],
@@ -151,8 +178,8 @@ def gemm_h_inter_step(
     return out
 
 
-@pl.jit
-def gemm_h_inter_chip(
+@pl.jit.incore
+def gemm_h_inter_incore(
     left: pl.Tensor[[TOK, HIDDEN], pl.BF16],
     weight: pl.Tensor[[HIDDEN, INTER_TP], pl.BF16],
     out: pl.InOut[pl.Tensor[[TOK, INTER_TP], pl.FP32]],
@@ -160,7 +187,16 @@ def gemm_h_inter_chip(
     return gemm_h_inter_step(left, weight, out)
 
 
-@pl.jit.incore
+@pl.jit
+def gemm_h_inter_chip(
+    left: pl.Tensor[[TOK, HIDDEN], pl.BF16],
+    weight: pl.Tensor[[HIDDEN, INTER_TP], pl.BF16],
+    out: pl.InOut[pl.Tensor[[TOK, INTER_TP], pl.FP32]],
+):
+    return gemm_h_inter_incore(left, weight, out)
+
+
+@pl.jit.inline
 def gemm_inter_h_step(
     left: pl.Tensor[[TOK, INTER_TP], pl.BF16],
     weight: pl.Tensor[[INTER_TP, HIDDEN], pl.BF16],
@@ -184,13 +220,22 @@ def gemm_inter_h_step(
     return out
 
 
+@pl.jit.incore
+def gemm_inter_h_incore(
+    left: pl.Tensor[[TOK, INTER_TP], pl.BF16],
+    weight: pl.Tensor[[INTER_TP, HIDDEN], pl.BF16],
+    out: pl.InOut[pl.Tensor[[TOK, HIDDEN], pl.FP32]],
+):
+    return gemm_inter_h_step(left, weight, out)
+
+
 @pl.jit
 def gemm_inter_h_chip(
     left: pl.Tensor[[TOK, INTER_TP], pl.BF16],
     weight: pl.Tensor[[INTER_TP, HIDDEN], pl.BF16],
     out: pl.InOut[pl.Tensor[[TOK, HIDDEN], pl.FP32]],
 ):
-    return gemm_inter_h_step(left, weight, out)
+    return gemm_inter_h_incore(left, weight, out)
 
 
 TP_GEMM_KERNELS = {

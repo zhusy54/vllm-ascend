@@ -21,6 +21,10 @@ vllm-ascend still owns the paged KV allocator (``block_table`` /
 module only dispatches those tensors into ``qwen3_14b.prefill_fwd`` and
 ``qwen3_14b.decode_fwd``. Select it with
 ``hf_overrides={"architectures": ["PyptoQwen3ForCausalLM"]}``.
+
+The TP=2 Engine path is experimental and currently supports one request at a
+time without preemption or cache reuse. The validated TP=2 route is the
+offline torchrun example.
 """
 
 from __future__ import annotations
@@ -51,6 +55,7 @@ from vllm_ascend.models.pypto_qwen3_adapter import (
     SAMPLED_IDS_PAD,
     STAGE_DECODE,
     STAGE_PREFILL,
+    PyptoChipSession,
     PyptoQwen3WeightBundle,
     build_decode_kernel_args,
     build_prefill_kernel_args,
@@ -58,22 +63,24 @@ from vllm_ascend.models.pypto_qwen3_adapter import (
     collect_hf_state_dict,
     compact_vllm_kv_for_contract,
     ensure_pypto_lib_on_path,
+    invoke_pypto_kernel,
     load_hf_state_from_dir,
     pack_official_weights,
     pin_weight_bundle_dtypes,
     prefill_chunk_meta,
     scatter_contract_kv_to_vllm,
     slice_real_vocab_logits,
-    invoke_pypto_kernel,
-    PyptoChipSession,
 )
 from vllm_ascend.models.pypto_qwen3_tp import (
     COMM_MARKER,
+    TP_TOK_PAD,
     build_gloo_shmem_comm,
     describe_tp_compute_args,
     select_compute_bundle,
     tp_rank_and_world,
 )
+
+TP_ENGINE_MAX_SEQ = 128
 
 
 def _tp_cpu_group():
@@ -99,6 +106,7 @@ class PyptoQwen3ForCausalLM(nn.Module):
         self.config = config
         self.vllm_config = vllm_config
         self._validate_single_card_shape(vllm_config)
+        self._configured_tp = int(vllm_config.parallel_config.tensor_parallel_size)
 
         scale = HEAD_DIM**-0.5
         self.attn_layers = nn.ModuleList(
@@ -138,6 +146,11 @@ class PyptoQwen3ForCausalLM(nn.Module):
             pack_official_weights(state.items(), padded_vocab=PADDED_VOCAB)
         )
         tp_rank, tp_world = tp_rank_and_world()
+        if tp_world != self._configured_tp:
+            raise RuntimeError(
+                f"configured tensor_parallel_size={self._configured_tp}, "
+                f"but runtime process group reports world_size={tp_world}"
+            )
         self._tp_world = tp_world
         if tp_world > 1:
             bundle = select_compute_bundle(bundle, tp_rank, tp_world)
@@ -242,11 +255,28 @@ class PyptoQwen3ForCausalLM(nn.Module):
                 block_table = block_table[:num_reqs]
                 # Drop BlockManager padding. A padded table of length 8 with a
                 # 1-page compact cache makes the kernel think max_blocks=8.
-                need = int(((int(seq_lens.max().item()) + PAGE_SIZE - 1) // PAGE_SIZE))
+                need = int((int(seq_lens.max().item()) + PAGE_SIZE - 1) // PAGE_SIZE)
                 need = max(need, 1)
                 if block_table.shape[1] > need:
                     block_table = block_table[:, :need]
         batch = int(seq_lens.shape[0])
+        if self._tp_world > 1:
+            real = self._forward_tp(
+                token_ids,
+                seq_lens,
+                num_prefills=num_prefills,
+                num_decodes=num_decodes,
+            )
+            self._last_logits = real
+            topv, topi = torch.topk(real[0], k=min(4, real.shape[-1]))
+            print(
+                f"PYPTO_QWEN3_LOGITS stage=tp batch={batch} ntok={num_tokens} "
+                f"seq={seq_lens.tolist()} argmax={int(real[0].argmax())} "
+                f"top_ids={topi.tolist()} top_val={[float(v) for v in topv]}",
+                flush=True,
+            )
+            return dummy
+
         query_start_loc = metadata.query_start_loc
         if query_start_loc is None:
             query_start_loc = token_ids.new_tensor([0, num_tokens], dtype=torch.int32)
@@ -275,21 +305,6 @@ class PyptoQwen3ForCausalLM(nn.Module):
             f"dev={k_cache.device} wq_dev={self._bundle.wq.device}",
             flush=True,
         )
-        if self._tp_world > 1:
-            real = self._forward_tp(token_ids, seq_lens, num_prefills=num_prefills, num_decodes=num_decodes)
-            if real is None:
-                self._last_logits = logits[:, :REAL_VOCAB].contiguous()
-                return dummy
-            self._last_logits = real
-            topv, topi = torch.topk(real[0], k=min(4, real.shape[-1]))
-            print(
-                f"PYPTO_QWEN3_LOGITS stage=tp batch={batch} ntok={num_tokens} "
-                f"seq={seq_lens.tolist()} argmax={int(real[0].argmax())} "
-                f"top_ids={topi.tolist()} top_val={[float(v) for v in topv]}",
-                flush=True,
-            )
-            return input_ids.new_zeros((input_ids.shape[0], HIDDEN), dtype=torch.bfloat16)
-
         kernels = self._ensure_kernels()
         chip = None if os.environ.get("PYPTO_QWEN3_CPU_INVOKE") == "1" else self._ensure_chip()
 
@@ -367,32 +382,66 @@ class PyptoQwen3ForCausalLM(nn.Module):
         *,
         num_prefills: int,
         num_decodes: int,
-    ) -> torch.Tensor | None:
+    ) -> torch.Tensor:
+        batch = int(seq_lens.numel())
+        if batch != 1 or num_prefills + num_decodes != 1:
+            raise RuntimeError(
+                "experimental PyPTO TP Engine path requires exactly one request "
+                f"and one stage; got batch={batch}, prefills={num_prefills}, decodes={num_decodes}"
+            )
         runner = self._ensure_tp_runner()
         seq = int(seq_lens[0].item())
-        if num_prefills > 0 and num_decodes == 0:
+        if num_prefills == 1:
+            if int(token_ids.numel()) > TP_TOK_PAD:
+                raise RuntimeError(
+                    f"experimental PyPTO TP prefill supports at most {TP_TOK_PAD} tokens, "
+                    f"got {int(token_ids.numel())}"
+                )
             return runner.prefill(token_ids)
-        if num_decodes > 0 and num_prefills == 0:
+        if num_decodes == 1:
+            if int(token_ids.numel()) != 1:
+                raise RuntimeError(
+                    "experimental PyPTO TP decode requires exactly one input token, "
+                    f"got {int(token_ids.numel())}"
+                )
+            if not 1 <= seq <= TP_ENGINE_MAX_SEQ:
+                raise RuntimeError(
+                    f"experimental PyPTO TP decode sequence length {seq} is outside "
+                    f"[1, {TP_ENGINE_MAX_SEQ}]"
+                )
             return runner.decode(token_ids, seq)
-        return None
+        raise RuntimeError("unreachable PyPTO TP stage")
 
     def _ensure_tp_runner(self):
         if self._tp_runner is not None:
             return self._tp_runner
-        from vllm_ascend.models.pypto_qwen3_tp_runner import PyptoTpRunner
-
         if self._bundle is None:
             raise RuntimeError("PyptoQwen3ForCausalLM.load_weights has not run")
         comm = self._ensure_tp_comm(self._bundle.wq.device)
-        self._tp_runner = PyptoTpRunner(
-            self._bundle,
-            comm,
-            self._ensure_chip(),
-            self.rope_cos,
-            self.rope_sin,
-        )
+        use_fused = os.environ.get("PYPTO_QWEN3_TP_FUSED", "1") == "1"
+        if use_fused:
+            from vllm_ascend.models.pypto_qwen3_tp_fused import PyptoTpFusedHost
+
+            self._tp_runner = PyptoTpFusedHost(
+                self._bundle,
+                comm,
+                self._ensure_chip(),
+                self.rope_cos,
+                self.rope_sin,
+            )
+            print(COMM_MARKER, "tp_fused_ready", flush=True)
+        else:
+            from vllm_ascend.models.pypto_qwen3_tp_runner import PyptoTpRunner
+
+            self._tp_runner = PyptoTpRunner(
+                self._bundle,
+                comm,
+                self._ensure_chip(),
+                self.rope_cos,
+                self.rope_sin,
+            )
+            print(COMM_MARKER, "tp_runner_ready", flush=True)
         self._tp_runner.compile()
-        print(COMM_MARKER, "tp_runner_ready", flush=True)
         return self._tp_runner
 
     def _collect_layer_kvs(self) -> list[torch.Tensor]:
@@ -433,8 +482,8 @@ class PyptoQwen3ForCausalLM(nn.Module):
         # Must be set before load_kernels() imports paged_attention_cce.
         os.environ.setdefault("QWEN3_PA_BLOCK_DIM", "20")
         ensure_pypto_lib_on_path()
-        from pypto.backend import BackendType, set_backend_type
         from contract.registry import get_contract
+        from pypto.backend import BackendType, set_backend_type
 
         set_backend_type(BackendType.Ascend910B)
         contract = get_contract("qwen3", "14b")
@@ -454,10 +503,21 @@ class PyptoQwen3ForCausalLM(nn.Module):
         tp = int(vllm_config.parallel_config.tensor_parallel_size)
         if tp not in (1, 2):
             raise ValueError(f"PyptoQwen3ForCausalLM supports tp=1 or tp=2, got tp={tp}")
+        if tp == 2 and os.environ.get("PYPTO_QWEN3_EXPERIMENTAL_TP_ENGINE") != "1":
+            raise ValueError(
+                "PyPTO TP=2 vLLM Engine support is experimental; set "
+                "PYPTO_QWEN3_EXPERIMENTAL_TP_ENGINE=1 to opt in, or use the validated "
+                "examples/offline_pypto_qwen3_14b_tp2.py torchrun path"
+            )
         if block_size != PAGE_SIZE:
             raise ValueError(f"PyptoQwen3ForCausalLM requires block_size={PAGE_SIZE}, got {block_size}")
         if max_model_len > MAX_SEQ:
             raise ValueError(f"max_model_len {max_model_len} exceeds kernel MAX_SEQ {MAX_SEQ}")
+        if tp == 2 and max_model_len > TP_ENGINE_MAX_SEQ:
+            raise ValueError(
+                f"experimental PyPTO TP Engine max_model_len must be <= {TP_ENGINE_MAX_SEQ}, "
+                f"got {max_model_len}"
+            )
         expected = {
             "hidden_size": HIDDEN,
             "intermediate_size": INTERMEDIATE,
