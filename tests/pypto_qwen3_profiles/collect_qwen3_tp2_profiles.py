@@ -156,57 +156,235 @@ _CORE_COLORS = {
     "unknown": "#9D755D",
 }
 
+_LAYER_TASK_LAYOUT = (
+    ("RMS", "aiv"),
+    ("QKV", "aic"),
+    ("QKV\npost", "aiv"),
+    ("attn\nprepare", "aiv"),
+    ("QK", "aic"),
+    ("softmax", "aiv"),
+    ("PV", "aic"),
+    ("context\ncast", "aiv"),
+    ("O proj", "aic"),
+    ("AR(O)", "aiv"),
+    ("FFN\nRMS", "aiv"),
+    ("gate/up", "aic"),
+    ("SwiGLU", "aiv"),
+    ("down", "aic"),
+    ("AR(down)", "aiv"),
+    ("residual\ntail", "aiv"),
+)
+
+
+def _split_whole_graph_tasks(records: dict, tasks: list[dict], source: Path) -> list[list[dict]]:
+    """Recover embed + 40x16 loop + tail from orchestrator submit order."""
+    phases = records.get("aicpu_orchestrator_phases")
+    if not isinstance(phases, list) or len(phases) != 1 or not isinstance(phases[0], list):
+        raise ValueError(f"{source} expected exactly one aicpu_orchestrator phase")
+    submissions = phases[0]
+    submit_by_task_id: dict[int, int] = {}
+    submit_indices: list[int] = []
+    for row_index, row in enumerate(submissions):
+        if not isinstance(row, dict):
+            raise ValueError(f"{source} orchestrator submission {row_index} is not an object")
+        try:
+            submit_idx = int(row["submit_idx"])
+            task_id = int(row["task_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"{source} orchestrator submission {row_index} has invalid ids") from exc
+        if task_id in submit_by_task_id:
+            raise ValueError(f"{source} orchestrator task_id {task_id} is not unique")
+        submit_by_task_id[task_id] = submit_idx
+        submit_indices.append(submit_idx)
+    if sorted(submit_indices) != list(range(len(submissions))):
+        raise ValueError(f"{source} orchestrator submit_idx is not contiguous from zero")
+
+    task_tokens = [int(task["task_token"]) for task in tasks]
+    if len(set(task_tokens)) != len(task_tokens):
+        raise ValueError(f"{source} contains duplicate AICore task tokens")
+    missing = [token for token in task_tokens if token not in submit_by_task_id]
+    if missing:
+        raise ValueError(f"{source} has {len(missing)} AICore tasks absent from orchestrator submissions")
+    ordered = sorted(tasks, key=lambda task: submit_by_task_id[int(task["task_token"])])
+    if len(ordered) != EXPECTED_WHOLE_GRAPH_TASKS:
+        raise ValueError(f"{source} expected {EXPECTED_WHOLE_GRAPH_TASKS} ordered AICore tasks, got {len(ordered)}")
+
+    outside = [ordered[0], *ordered[-2:]]
+    if [str(task["core_type"]) for task in outside] != ["aiv", "aiv", "aic"]:
+        raise ValueError(f"{source} expected AIV embed, AIV final RMS and AIC LM head")
+    loop_tasks = ordered[1:-2]
+
+    layers = [
+        loop_tasks[offset : offset + len(_LAYER_TASK_LAYOUT)]
+        for offset in range(0, len(loop_tasks), len(_LAYER_TASK_LAYOUT))
+    ]
+    previous_layer_last_submit: int | None = None
+    for layer_index, layer in enumerate(layers):
+        layer_submits = [submit_by_task_id[int(task["task_token"])] for task in layer]
+        if layer_submits != list(range(layer_submits[0], layer_submits[0] + len(_LAYER_TASK_LAYOUT))):
+            raise ValueError(f"{source} layer {layer_index} AICore submissions are not contiguous")
+        if previous_layer_last_submit is not None and layer_submits[0] != previous_layer_last_submit + 3:
+            raise ValueError(f"{source} layer {layer_index} does not follow the expected two loop-control submits")
+        for step, (task, (_name, expected_core_type)) in enumerate(zip(layer, _LAYER_TASK_LAYOUT, strict=True)):
+            if task["core_type"] != expected_core_type:
+                raise ValueError(
+                    f"{source} layer {layer_index} step {step + 1} expected {expected_core_type}, "
+                    f"got {task['core_type']}"
+                )
+        previous_layer_last_submit = layer_submits[-1]
+    return layers
+
 
 def _plot_task_gantt(records: dict, source: Path, png_path: Path, title: str) -> None:
-    """Render every raw AICore record on its physical-core lane."""
+    """Render wall-clock context plus a readable 40-layer unwrapped swimlane."""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib.patches import Patch
+    from matplotlib.patches import Patch, Rectangle
+    from matplotlib.ticker import MultipleLocator
 
     tasks, _scale_us, _base_cycles = _task_timing(records, source)
+    layers = _split_whole_graph_tasks(records, tasks, source)
     cores = sorted({int(task["core_id"]) for task in tasks})
     by_core: dict[int, list[dict]] = {core: [] for core in cores}
     for task in tasks:
         by_core[int(task["core_id"])].append(task)
     wall_us = max(float(task["start_us"]) + float(task["duration_us"]) for task in tasks)
-    fig_h = max(8.0, 0.24 * len(cores) + 2.5)
-    fig, ax = plt.subplots(figsize=(18, fig_h))
+    core_counts = Counter(str(task["core_type"]) for task in tasks)
+
+    fig = plt.figure(figsize=(18, 16.5), layout="constrained")
+    grid = fig.add_gridspec(3, 1, height_ratios=(2.5, 11.5, 1.15))
+    overview_ax = fig.add_subplot(grid[0])
+    layers_ax = fig.add_subplot(grid[1])
+    key_ax = fig.add_subplot(grid[2])
+
+    fig.suptitle(
+        f"{title}\n"
+        f"one run | 40 layers x 16 tasks | {len(tasks)} raw tasks "
+        f"(AIC {core_counts['aic']} / AIV {core_counts['aiv']}) | wall {wall_us / 1000.0:.3f} ms",
+        fontsize=15,
+        fontweight="semibold",
+    )
+
+    # Keep the true physical-core view as wall-clock context. The layer starts
+    # make the repeated whole-model structure visible even though short AIV
+    # tasks are necessarily sub-pixel at this scale.
     seen_types: set[str] = set()
     for lane, core in enumerate(cores):
         for task in sorted(by_core[core], key=lambda item: float(item["start_us"])):
             core_type = str(task["core_type"])
             seen_types.add(core_type)
-            ax.broken_barh(
+            overview_ax.broken_barh(
                 [
                     (
                         float(task["start_us"]) / 1000.0,
-                        max(float(task["duration_us"]) / 1000.0, 0.0001),
+                        float(task["duration_us"]) / 1000.0,
                     )
                 ],
-                (lane - 0.4, 0.8),
+                (lane - 0.34, 0.68),
                 facecolors=_CORE_COLORS.get(core_type, _CORE_COLORS["unknown"]),
-                edgecolors="#222222",
-                linewidth=0.15,
+                edgecolors="none",
             )
-    ax.set_yticks(range(len(cores)))
-    ax.set_yticklabels([f"core {core}" for core in cores], fontsize=7)
-    ax.set_xlabel("device time from first AICore task (ms)")
-    ax.set_ylabel("physical AICore")
-    ax.set_title(f"{title}\n{len(tasks)} raw tasks on {len(cores)} cores; wall={wall_us / 1000.0:.3f} ms")
-    ax.invert_yaxis()
-    ax.grid(axis="x", alpha=0.25)
-    ax.legend(
+    layer_ticks = [float(layers[index][0]["start_us"]) / 1000.0 for index in range(0, len(layers), 5)]
+    for tick in layer_ticks:
+        overview_ax.axvline(tick, color="#5F6368", linewidth=0.6, alpha=0.35, zorder=0)
+    overview_top = overview_ax.secondary_xaxis("top")
+    overview_top.set_xticks(layer_ticks, [f"L{index:02d}" for index in range(0, len(layers), 5)])
+    overview_top.tick_params(axis="x", length=0, labelsize=8, pad=2)
+    overview_ax.set_yticks(range(len(cores)))
+    overview_ax.set_yticklabels([f"core {core}" for core in cores], fontsize=8)
+    overview_ax.set_xlim(0.0, wall_us / 1000.0)
+    overview_ax.set_xlabel("device time from first AICore task (ms)")
+    overview_ax.set_ylabel("physical core")
+    overview_ax.set_title("Wall-clock overview (true physical-core placement)", loc="left", fontsize=11)
+    overview_ax.invert_yaxis()
+    overview_ax.grid(axis="x", color="#DADCE0", linewidth=0.7)
+    overview_ax.legend(
         handles=[
-            Patch(color=_CORE_COLORS.get(kind, _CORE_COLORS["unknown"]), label=kind) for kind in sorted(seen_types)
+            Patch(color=_CORE_COLORS.get(kind, _CORE_COLORS["unknown"]), label=kind.upper())
+            for kind in sorted(seen_types)
         ],
         loc="upper right",
         fontsize=8,
+        frameon=False,
+        ncols=2,
     )
-    fig.tight_layout()
+
+    # Reset the x origin for every transformer layer while keeping one common
+    # millisecond scale. This preserves measured durations and gives every one
+    # of the 640 loop tasks enough pixels to be inspected in a static image.
+    max_layer_ms = max(
+        (float(layer[-1]["start_us"]) + float(layer[-1]["duration_us"]) - float(layer[0]["start_us"])) / 1000.0
+        for layer in layers
+    )
+    for layer_index, layer in enumerate(layers):
+        if layer_index % 2:
+            layers_ax.axhspan(layer_index - 0.5, layer_index + 0.5, color="#F7F8FA", zorder=0)
+        layer_start_us = float(layer[0]["start_us"])
+        for task in layer:
+            core_type = str(task["core_type"])
+            layers_ax.broken_barh(
+                [
+                    (
+                        (float(task["start_us"]) - layer_start_us) / 1000.0,
+                        float(task["duration_us"]) / 1000.0,
+                    )
+                ],
+                (layer_index - 0.39, 0.78),
+                facecolors=_CORE_COLORS.get(core_type, _CORE_COLORS["unknown"]),
+                edgecolors="none",
+                zorder=2,
+            )
+    layers_ax.set_xlim(0.0, max_layer_ms * 1.015)
+    layers_ax.set_ylim(-0.6, len(layers) - 0.4)
+    layers_ax.set_yticks(range(len(layers)))
+    layers_ax.set_yticklabels([f"L{index:02d}" for index in range(len(layers))], fontsize=7.5)
+    layers_ax.invert_yaxis()
+    layers_ax.xaxis.set_major_locator(MultipleLocator(1.0))
+    layers_ax.grid(axis="x", color="#DADCE0", linewidth=0.7)
+    layers_ax.set_axisbelow(True)
+    layers_ax.set_xlabel("elapsed time within each layer (ms; common scale)")
+    layers_ax.set_ylabel("transformer layer")
+    layers_ax.set_title(
+        "Layer-unwrapped swimlanes — actual task durations; each row resets to its own layer start",
+        loc="left",
+        fontsize=11,
+    )
+
+    key_ax.set_xlim(0, len(_LAYER_TASK_LAYOUT))
+    key_ax.set_ylim(0, 1)
+    for step, (name, core_type) in enumerate(_LAYER_TASK_LAYOUT):
+        key_ax.add_patch(
+            Rectangle(
+                (step, 0),
+                1,
+                1,
+                facecolor=_CORE_COLORS[core_type],
+                edgecolor="white",
+                linewidth=1.2,
+            )
+        )
+        key_ax.text(
+            step + 0.5,
+            0.5,
+            f"{step + 1:02d}\n{name}",
+            ha="center",
+            va="center",
+            color="white",
+            fontsize=7.2,
+            fontweight="semibold",
+        )
+    key_ax.set_title(
+        "Per-layer task order (equal-width key; color denotes engine, cell width is not duration)",
+        loc="left",
+        fontsize=10,
+        pad=5,
+    )
+    key_ax.set_axis_off()
+
     png_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(png_path, dpi=120)
+    fig.savefig(png_path, dpi=160)
     plt.close(fig)
     if not png_path.is_file() or png_path.stat().st_size == 0:
         raise RuntimeError(f"failed to write task-level swimlane PNG {png_path}")
@@ -306,9 +484,7 @@ def _assert_torch_whole_graph_steps(prof_root: Path, active: int) -> None:
                 try:
                     graph_steps.append(int(row["Step Id"]))
                 except (KeyError, TypeError, ValueError) as exc:
-                    raise RuntimeError(
-                        f"torch profiler whole-graph row has invalid Step Id in {csv_path}"
-                    ) from exc
+                    raise RuntimeError(f"torch profiler whole-graph row has invalid Step Id in {csv_path}") from exc
     expected_steps = list(range(active))
     if sorted(graph_steps) != expected_steps:
         raise RuntimeError(

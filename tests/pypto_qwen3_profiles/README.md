@@ -30,9 +30,12 @@ PYPTO_QWEN3_PROFILE_STAGE tp_prefill_fwd ChipWorker.run=1 aicore_tasks=<N> rank=
 PYPTO_QWEN3_PROFILE_STAGE tp_decode_fwd ChipWorker.run=1 aicore_tasks=<N> rank=0
 ```
 
-实际 prefill 标记也会带 `aicore_tasks=<N>`。PNG 和 Perfetto trace 直接按
-raw records 中的每条 AICore task 绘制到物理 core 泳道，不再把整个 fused
-stage 折叠成一个总时长块。torch 模式要求两个 rank 都同时生成非空的
+实际 prefill 标记也会带 `aicore_tasks=<N>`。PNG 使用上下两级视图：上方保留
+raw records 中每条 AICore task 的真实物理 core 与整图 wall-clock 时间轴；主图把
+40 层逐行展开，每一行从该层起点重新计时并共用同一毫秒刻度，因此 640 个层内
+task 的实测时长都可辨认，未用最小显示宽度夸大短 task。下方等宽色块只说明每层
+16 个 task 的顺序与 AIC/AIV 类型，不表示时长。Perfetto trace 仍保留可交互的原始
+物理 core 时间线。torch 模式要求两个 rank 都同时生成非空的
 `kernel_details.csv` 和 `trace_view.json`，并确认 `aicore_kernel_0` 整图调用数等于
 1 次 prefill 加配置的 decode 次数；任一缺失都会失败，不会沿用旧产物。
 两个模式都会广播 rank 0 的 greedy token 作为下一步输入，同时硬校验
