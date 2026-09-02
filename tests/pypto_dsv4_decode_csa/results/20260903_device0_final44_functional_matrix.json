@@ -1,0 +1,313 @@
+{
+  "schema_version": "1.0.0",
+  "campaign": "DeepSeekV4 decode CSA PyPTO L1 final-44 functional matrix",
+  "recorded_at": "2026-09-03T00:08:00+08:00",
+  "device": 0,
+  "platform": "a2a3",
+  "source": {
+    "vllm_ascend_base_commit": "e7cb166290dfcbf2f997aa67f01b323be643fe0e",
+    "pypto_commit": "9cece0b730a96fe1a52c2637537132f524ffe1ea",
+    "simpler_commit": "b6f905f63277597bd2547d672fd9d57b6013fca9",
+    "production_python_tree_sha256": "50115110dbbe6d8aaabacb769a41f931e8b904c91d866c50160b66453467f752",
+    "abi_parameter_count": 44,
+    "tensor_parameter_count": 40,
+    "runtime_scalar_count": 4,
+    "output_indices": [39],
+    "contains_writeback_task_dependency": true,
+    "contains_kv_touch": false,
+    "working_tree_committed": false
+  },
+  "rules": {
+    "runtime_uses_fresh_python_process": true,
+    "trb_and_hbg_never_share_a_process": true,
+    "npu_device": 0,
+    "latency_samples_are_benchmark_results": false,
+    "notes": "Latency fields below are one-shot diagnostics only. HBG is functionally correct but currently performance-unusable."
+  },
+  "partial_bucket": [
+    {
+      "runtime": "tensormap_and_ringbuffer",
+      "bucket": 4,
+      "capture_actual": 2,
+      "replay_actuals": [1, 3, 2, 4, 1],
+      "block0_mismatches": {
+        "compressed_kv": 0,
+        "swa_kv": 0,
+        "main_compressor_state": 0,
+        "inner_compressor_state": 0,
+        "indexer_k": 0,
+        "indexer_scale": 0
+      },
+      "page_padding_mismatches": 0,
+      "padded_output_nonzero": 0,
+      "metadata_addresses_stable": true,
+      "result": "pass",
+      "log": "/tmp/csa_partial_bucket_trb_v3.log"
+    },
+    {
+      "runtime": "host_build_graph",
+      "bucket": 4,
+      "capture_actual": 2,
+      "replay_actuals": [1, 3, 2, 4, 1],
+      "block0_mismatches": {
+        "compressed_kv": 0,
+        "swa_kv": 0,
+        "main_compressor_state": 0,
+        "inner_compressor_state": 0,
+        "indexer_k": 0,
+        "indexer_scale": 0
+      },
+      "page_padding_mismatches": 0,
+      "padded_output_nonzero": 0,
+      "metadata_addresses_stable": true,
+      "result": "pass",
+      "log": "/tmp/csa_partial_bucket_hbg.log"
+    }
+  ],
+  "multi_bucket_aclgraph": [
+    {
+      "runtime": "tensormap_and_ringbuffer",
+      "buckets": [4, 8, 12, 16],
+      "compiled_bucket_count": 4,
+      "replay_order": [4, 16, 8, 12, 16, 4, 12, 8],
+      "replay_max_error": 0.0,
+      "retained_capture_bindings": 4,
+      "destroyed_bucket": 8,
+      "survivor_bucket": 16,
+      "survivor_replay_after_destroy": true,
+      "zero_projection_weight": true,
+      "result": "pass"
+    },
+    {
+      "runtime": "host_build_graph",
+      "buckets": [4, 8, 12, 16],
+      "compiled_bucket_count": 4,
+      "replay_order": [4, 16, 8, 12, 16, 4, 12, 8],
+      "replay_max_error": 0.0,
+      "retained_capture_bindings": 4,
+      "destroyed_bucket": 8,
+      "survivor_bucket": 16,
+      "survivor_replay_after_destroy": true,
+      "zero_projection_weight": true,
+      "result": "pass"
+    }
+  ],
+  "nonzero_native_comparison": [
+    {
+      "runtime": "tensormap_and_ringbuffer",
+      "bucket": 4,
+      "correctness_steps": 4,
+      "output_max_abs_error": 0.036376953125,
+      "compressed_kv_max_abs_error": 0.0078125,
+      "swa_kv_bit_exact": true,
+      "main_state_max_abs_error": 2.9802322387695312e-08,
+      "inner_state_max_abs_error": 4.0978193283081055e-08,
+      "indexer_k_bit_exact": true,
+      "indexer_scale_bit_exact": true,
+      "all_close": true,
+      "result": "pass"
+    },
+    {
+      "runtime": "tensormap_and_ringbuffer",
+      "bucket": 8,
+      "correctness_steps": 1,
+      "output_max_abs_error": 0.036376953125,
+      "compressed_kv_max_abs_error": 0.0078125,
+      "swa_kv_bit_exact": true,
+      "main_state_max_abs_error": 2.9802322387695312e-08,
+      "inner_state_max_abs_error": 2.2351741790771484e-08,
+      "indexer_k_bit_exact": true,
+      "indexer_scale_bit_exact": true,
+      "all_close": true,
+      "diagnostic_native_ms": 2.469490747898817,
+      "diagnostic_pypto_ms": 2.795353066176176,
+      "result": "pass",
+      "log": "/tmp/csa_native_b8_trb_final.log"
+    },
+    {
+      "runtime": "tensormap_and_ringbuffer",
+      "bucket": 12,
+      "correctness_steps": 1,
+      "output_max_abs_error": 0.036376953125,
+      "compressed_kv_max_abs_error": 0.0078125,
+      "swa_kv_bit_exact": true,
+      "main_state_max_abs_error": 2.9802322387695312e-08,
+      "inner_state_max_abs_error": 2.9802322387695312e-08,
+      "indexer_k_bit_exact": true,
+      "indexer_scale_bit_exact": true,
+      "all_close": true,
+      "diagnostic_native_ms": 2.566094044595957,
+      "diagnostic_pypto_ms": 3.3774846233427525,
+      "result": "pass",
+      "log": "/tmp/csa_native_b12_trb_final.log"
+    },
+    {
+      "runtime": "tensormap_and_ringbuffer",
+      "bucket": 16,
+      "correctness_steps": 1,
+      "output_max_abs_error": 0.036376953125,
+      "compressed_kv_max_abs_error": 0.0078125,
+      "swa_kv_bit_exact": true,
+      "main_state_max_abs_error": 2.9802322387695312e-08,
+      "inner_state_max_abs_error": 4.0978193283081055e-08,
+      "indexer_k_bit_exact": true,
+      "indexer_scale_bit_exact": true,
+      "all_close": true,
+      "diagnostic_native_ms": 2.6345867663621902,
+      "diagnostic_pypto_ms": 3.8508716970682144,
+      "result": "pass",
+      "log": "/tmp/csa_native_b16_trb_final.log"
+    },
+    {
+      "runtime": "host_build_graph",
+      "bucket": 4,
+      "correctness_scope": "single-op ACLGraph, three nonzero replay inputs",
+      "output_and_six_states_close": true,
+      "diagnostic_native_graph_ms": 0.671216,
+      "diagnostic_pypto_graph_ms": 319.84242,
+      "result": "pass",
+      "performance_usable": false
+    },
+    {
+      "runtime": "host_build_graph",
+      "bucket": 8,
+      "correctness_steps": 1,
+      "output_max_abs_error": 0.036376953125,
+      "output_and_six_states_close": true,
+      "diagnostic_native_ms": 2.449970692396164,
+      "diagnostic_pypto_ms": 587.3649152927101,
+      "result": "pass",
+      "performance_usable": false,
+      "log": "/tmp/csa_native_b8_hbg_final.log"
+    },
+    {
+      "runtime": "host_build_graph",
+      "bucket": 12,
+      "correctness_steps": 1,
+      "output_max_abs_error": 0.036376953125,
+      "output_and_six_states_close": true,
+      "diagnostic_native_ms": 2.549444790929556,
+      "diagnostic_pypto_ms": 586.7097610607743,
+      "result": "pass",
+      "performance_usable": false,
+      "log": "/tmp/csa_native_b12_hbg_final.log"
+    },
+    {
+      "runtime": "host_build_graph",
+      "bucket": 16,
+      "correctness_steps": 1,
+      "output_max_abs_error": 0.036376953125,
+      "output_and_six_states_close": true,
+      "diagnostic_native_ms": 2.568224910646677,
+      "diagnostic_pypto_ms": 585.9258589334786,
+      "result": "pass",
+      "performance_usable": false,
+      "log": "/tmp/csa_native_b16_hbg_final.log"
+    }
+  ],
+  "four_layer_nonzero_capsule": [
+    {
+      "runtime": "tensormap_and_ringbuffer",
+      "candidate_topology": "PPPP",
+      "local_same_input_oracle": true,
+      "output_and_six_states_close_per_layer": true,
+      "final_output_max_abs_error": 0.10400390625,
+      "final_output_mean_abs_error": 0.015396037840901045,
+      "result": "pass",
+      "log": "/tmp/csa_native_capsule_pppp_trb_v7.log"
+    },
+    {
+      "runtime": "tensormap_and_ringbuffer",
+      "candidate_topology": "NPNP",
+      "local_same_input_oracle": true,
+      "output_and_six_states_close_per_layer": true,
+      "final_output_max_abs_error": 0.072998046875,
+      "final_output_mean_abs_error": 0.012139094136585982,
+      "result": "pass",
+      "log": "/tmp/csa_native_capsule_npnp_trb.log"
+    },
+    {
+      "runtime": "tensormap_and_ringbuffer",
+      "candidate_topology": "PNPN",
+      "local_same_input_oracle": true,
+      "output_and_six_states_close_per_layer": true,
+      "final_output_max_abs_error": 0.1123046875,
+      "final_output_mean_abs_error": 0.018917381348728668,
+      "result": "pass",
+      "log": "/tmp/csa_native_capsule_pnpn_trb.log"
+    },
+    {
+      "runtime": "host_build_graph",
+      "candidate_topology": "PPPP",
+      "local_same_input_oracle": true,
+      "output_and_six_states_close_per_layer": true,
+      "final_output_max_abs_error": 0.10400390625,
+      "final_output_mean_abs_error": 0.015396037840901045,
+      "result": "pass",
+      "log": "/tmp/csa_native_capsule_pppp_hbg.log"
+    },
+    {
+      "runtime": "host_build_graph",
+      "candidate_topology": "NPNP",
+      "local_same_input_oracle": true,
+      "output_and_six_states_close_per_layer": true,
+      "final_output_max_abs_error": 0.072998046875,
+      "final_output_mean_abs_error": 0.012139094136585982,
+      "result": "pass",
+      "log": "/tmp/csa_native_capsule_npnp_hbg.log"
+    },
+    {
+      "runtime": "host_build_graph",
+      "candidate_topology": "PNPN",
+      "local_same_input_oracle": true,
+      "output_and_six_states_close_per_layer": true,
+      "final_output_max_abs_error": 0.1123046875,
+      "final_output_mean_abs_error": 0.018917381348728668,
+      "result": "pass",
+      "log": "/tmp/csa_native_capsule_pnpn_hbg.log"
+    }
+  ],
+  "long_trace": [
+        {
+            "runtime": "tensormap_and_ringbuffer",
+            "bucket": 4,
+            "seq": 8,
+            "correctness_steps": 128,
+            "start_position": 0,
+            "sync_between_correctness_steps": false,
+            "output_close": true,
+            "output_max_abs_error": 0.04019451141357422,
+            "non_quantized_states_close": true,
+            "indexer_raw_exact": false,
+            "indexer_raw_mismatch_elements": 4,
+            "indexer_compared_elements": 131072,
+            "indexer_raw_mismatch_fraction": 3.0517578125e-05,
+            "indexer_raw_max_bin_error": 1,
+            "indexer_scale_bit_exact": true,
+            "indexer_write_sets_equal": true,
+            "indexer_dequantized_max_abs_error": 0.019317626953125,
+            "indexer_dequantized_mean_abs_error": 5.745096132159233e-07,
+            "indexer_dequantized_max_scale_quanta": 1.0,
+            "indexer_dequantized_over_policy_elements": 0,
+            "indexer_joint_acceptable": true,
+            "first_raw_mismatch": {
+                "physical_row": 2233,
+                "column": 54,
+                "physical_block": 69,
+                "block_offset": 25,
+                "reference_raw": -6,
+                "candidate_raw": -5,
+                "scale": 0.0180816650390625,
+                "first_mapped_decode_step": 92
+            },
+            "result": "pass",
+            "log": "/tmp/csa_native_b4_trb_128step_quantized_contract.log"
+        }
+    ],
+    "known_boundaries": [
+    "The partial-bucket and multi-bucket ACLGraph cases use zero projection weights and prove guards/lifecycle, not nonzero algorithm accuracy.",
+    "The B8/B12/B16 nonzero cases are eager native-vs-PyPTO comparisons; only B4 currently has nonzero single-op ACLGraph evidence.",
+        "The 128-step TRB fixed-request advance path passes the separate INT8-K/FP16-scale joint contract while preserving raw indexer K as explicitly non-bit-exact; request churn and block reuse remain unproven.",
+    "No full model, vLLM Engine, HC/MoE shell, TP/EP/HCCL, A5, or simulator claim is made."
+  ]
+}

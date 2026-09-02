@@ -1,0 +1,333 @@
+{
+  "schema_version": "1.0.0",
+  "campaign": "DeepSeekV4 decode CSA PyPTO L1 TRB ACLGraph steady-state performance acceptance",
+  "recorded_at": "2026-09-03T03:44:30+08:00",
+  "result": "pass",
+  "pass": true,
+  "target": {
+    "device_id": 0,
+    "device_family": "A3",
+    "device_product": "Ascend910_9362",
+    "platform": "a2a3",
+    "cube_core_count": 20,
+    "vector_core_count": 40,
+    "runtime": "tensormap_and_ringbuffer",
+    "mode": "aclgraph",
+    "native_path": "production vllm::dsa_forward with default multistream overlap enabled",
+    "candidate_path": "PyPTO L1 single-op decode CSA",
+    "specialization_key": "A3-TP1-B4-S8-ratio4",
+    "batch": 4,
+    "sequence_length": 8,
+    "tokens": 32,
+    "compression_ratio": 4
+  },
+  "source": {
+    "vllm_ascend_base_commit": "e7cb166290dfcbf2f997aa67f01b323be643fe0e",
+    "pypto_commit": "9cece0b730a96fe1a52c2637537132f524ffe1ea",
+    "simpler_commit": "b6f905f63277597bd2547d672fd9d57b6013fca9",
+    "production_python_tree_sha256": "8ff1f35bf651b4e3cb8603e595d699a16346307623abc8ccd6ff5f5314530a2c",
+    "production_python_tree_sha256_method": "sha256 of the sorted sha256sum listing for vllm_ascend/ops/_pypto_dsv4_csa/*.py",
+    "current_production_python_tree_sha256": "b2da96094d1008235720537aeaf1f8cad88170c064f52dc9fec6363b74c201e5",
+    "post_measurement_source_change": "After all timing runs, backend.py stopped reading PTO2_RING_TASK_WINDOW and now passes the same internally fixed HBG window 128 directly. The measured TRB path and its generated program are unchanged; the timed tree hash is retained above rather than rewritten.",
+    "benchmark_entry": "tests/pypto_dsv4_decode_csa/a3_native_aclgraph_compare.py",
+    "benchmark_entry_sha256": "ba29c3ae2a2dd96f370c99722076ab20658c233cc7c812156f0042839be419ee",
+    "benchmark_support_sha256": {
+      "tests/pypto_dsv4_decode_csa/benchmark.py": "6596868fcdeb74eeab655e7a1c8826a8a8a666aac31a6678f415e0a223e90e8e",
+      "tests/pypto_dsv4_decode_csa/native_fixture.py": "275a64d641131487d0f1723c5230c608cbaf4f091275b76f82df7d4709fdf435"
+    },
+    "working_tree_committed": false
+  },
+  "protocol": {
+    "fresh_processes": 3,
+    "ordering": "same-card same-stream ABBA",
+    "warmup_iterations_per_process": 20,
+    "sample_iterations_per_process": 100,
+    "caller_quiesce": "stream synchronize after at most 20 enqueues",
+    "state_worlds": "independent equal weights/input; disjoint mutable caches/output",
+    "seed": 20260902,
+    "primary_metric": "device_span",
+    "primary_metric_unit": "microseconds",
+    "quantiles": [
+      "p50",
+      "p90",
+      "p99"
+    ],
+    "paired_difference_definition": "Dq = native_device_span_q - pypto_device_span_q; positive means PyPTO is faster",
+    "aggregation": "For each quantile, take the median of the three fresh-process paired differences; raw samples are not pooled across processes.",
+    "steady_state_statistics": "Only SamplingPhase.SAMPLE contributes to p50/p90/p99. SamplingPhase.WARMUP and all cold setup are excluded.",
+    "native_multistream_dsv4_dsa_overlap": true
+  },
+  "timing_scope": {
+    "primary_device_span_semantics": "Pre-created same-stream NPU timing events surround each complete ACLGraph replay. The ordered start/replay/end queue sequence covers consumer dequeue and launch gaps plus device scheduler and kernel execution. Native auxiliary-stream work joins the caller stream before the tail event.",
+    "host_enqueue_semantics": "The exact ACLGraph graph.replay producer-side enqueue is measured separately. It is an overlapping view of the same invocation and must not be added to device_span.",
+    "included_in_primary_path": [
+      "all steady-state work that really occurs between the same-stream start and end timing events",
+      "producer enqueue delay when it leaves the device-side ordered stream waiting for the captured replay",
+      "taskQueue consumer dequeue and launch work",
+      "AICPU orchestration and device scheduler work",
+      "AICore and AIV child-kernel execution",
+      "runtime dependency resolution, predicated-task retirement, barriers, and inter-child gaps",
+      "any tensor-address, scalar, KernelArgs, or runtime patch work that is actually repeated by the captured/runtime path",
+      "native production auxiliary-stream branches through their mandatory join back to the caller stream"
+    ],
+    "excluded_from_primary_samples": [
+      "first PyPTO program compilation",
+      "PTOAS, code generation, and generated-binary materialization or registration",
+      "runtime, context, owner creation, prepare, and callable setup",
+      "weight packing and weight preparation",
+      "ordinary eager warmup",
+      "ACLGraph capture and graph construction",
+      "the first invocation or replay at the final sampled tensor addresses",
+      "one-time structure-cache population",
+      "timing-event pool or handle initialization",
+      "the 20 explicitly recorded benchmark warmup iterations",
+      "correctness golden generation, correctness comparison, and validation-only copies",
+      "phase-reset copies and external input preparation; the sampled input is already device-resident",
+      "caller batch synchronization used to quiesce or collect completed timing events",
+      "sample aggregation, JSON serialization, and reporting"
+    ],
+    "captured_argument_note": "These ACLGraph runs replay one already-captured fixed B4/S8 tensor/scalar snapshot. No per-replay Python metadata, address, or scalar update is required; this does not authorize moving any genuinely repeated patch cost out of future measurements.",
+    "cold_path_boundary": "Compile/PTOAS/codegen/binary/context/weight preparation and ordinary warmup complete before capture. Capture, first final-address replay, structure-cache population, and timing-handle initialization complete before benchmark warmup and sampling."
+  },
+  "runs": [
+    {
+      "run": 1,
+      "fresh_process": true,
+      "pid": 2813329,
+      "log_path": "/tmp/csa_trb_qk_valid_only_formal_abba_w20_s100.log",
+      "log_sha256": "13845100c90adcb5e266749fce345867d9a354bd94c2b758015182f5e307c693",
+      "log_mtime": "2026-09-03T03:34:11.676853037+08:00",
+      "generated_artifact": "build_output/_jit_decode_csa_core_20260903_033401_102771",
+      "device_span_us": {
+        "native": {
+          "p50": 633.460,
+          "p90": 639.878,
+          "p99": 643.3596
+        },
+        "pypto": {
+          "p50": 613.110,
+          "p90": 627.598,
+          "p99": 636.2278
+        },
+        "paired_difference_native_minus_pypto": {
+          "p50": 20.350,
+          "p90": 12.280,
+          "p99": 7.1318
+        }
+      },
+      "host_enqueue_us_overlapping_diagnostic": {
+        "native": {
+          "p50": 17.950,
+          "p90": 20.3011,
+          "p99": 34.11821
+        },
+        "pypto": {
+          "p50": 18.766,
+          "p90": 24.996,
+          "p99": 27.4848
+        }
+      },
+      "pre_timing_correctness_pass": true,
+      "post_timing_correctness_pass": true
+    },
+    {
+      "run": 2,
+      "fresh_process": true,
+      "pid": 2816042,
+      "log_path": "/tmp/csa_trb_qk_valid_only_formal_abba_run2.log",
+      "log_sha256": "9916b4c40cb6e17666874cbfa48b1a19171d2bb9ea4c8ef8f56283ed7f629a5b",
+      "log_mtime": "2026-09-03T03:34:57.682513195+08:00",
+      "generated_artifact": "build_output/_jit_decode_csa_core_20260903_033447_554047",
+      "device_span_us": {
+        "native": {
+          "p50": 645.020,
+          "p90": 652.750,
+          "p99": 655.9724
+        },
+        "pypto": {
+          "p50": 628.720,
+          "p90": 644.216,
+          "p99": 650.9402
+        },
+        "paired_difference_native_minus_pypto": {
+          "p50": 16.300,
+          "p90": 8.534,
+          "p99": 5.0322
+        }
+      },
+      "host_enqueue_us_overlapping_diagnostic": {
+        "native": {
+          "p50": 17.1455,
+          "p90": 19.9331,
+          "p99": 28.0169
+        },
+        "pypto": {
+          "p50": 17.241,
+          "p90": 24.131,
+          "p99": 31.1028
+        }
+      },
+      "pre_timing_correctness_pass": true,
+      "post_timing_correctness_pass": true
+    },
+    {
+      "run": 3,
+      "fresh_process": true,
+      "pid": 2818744,
+      "log_path": "/tmp/csa_trb_qk_valid_only_formal_abba_run3.log",
+      "log_sha256": "80787c9d276dacb5ddb543e28b97ebb1132ced3f1e90e58f153c9815e7b8e7da",
+      "log_mtime": "2026-09-03T03:35:44.188195809+08:00",
+      "generated_artifact": "build_output/_jit_decode_csa_core_20260903_033533_609661",
+      "device_span_us": {
+        "native": {
+          "p50": 625.040,
+          "p90": 630.470,
+          "p99": 633.4008
+        },
+        "pypto": {
+          "p50": 619.290,
+          "p90": 632.836,
+          "p99": 642.3964
+        },
+        "paired_difference_native_minus_pypto": {
+          "p50": 5.750,
+          "p90": -2.366,
+          "p99": -8.9956
+        }
+      },
+      "host_enqueue_us_overlapping_diagnostic": {
+        "native": {
+          "p50": 18.051,
+          "p90": 20.6201,
+          "p99": 25.8491
+        },
+        "pypto": {
+          "p50": 17.8905,
+          "p90": 23.652,
+          "p99": 26.82691
+        }
+      },
+      "pre_timing_correctness_pass": true,
+      "post_timing_correctness_pass": true
+    }
+  ],
+  "aggregate_acceptance": {
+    "difference_unit": "microseconds",
+    "paired_difference_direction": "native - pypto",
+    "per_process_differences": {
+      "p50": [
+        20.350,
+        16.300,
+        5.750
+      ],
+      "p90": [
+        12.280,
+        8.534,
+        -2.366
+      ],
+      "p99": [
+        7.1318,
+        5.0322,
+        -8.9956
+      ]
+    },
+    "median_paired_difference": {
+      "p50": 16.300,
+      "p90": 8.534,
+      "p99": 5.032
+    },
+    "median_paired_difference_display": {
+      "p50": "+16.300 us",
+      "p90": "+8.534 us",
+      "p99": "+5.032 us"
+    },
+    "rules": {
+      "p50": "median(D50) > 0",
+      "p90": "median(D90) >= 0",
+      "p99": "median(D99) >= 0",
+      "all_processes_must_pass_pre_and_post_correctness": true,
+      "individual_processes_are_not_each_required_to_win_every_tail_quantile": true
+    },
+    "rule_results": {
+      "p50": true,
+      "p90": true,
+      "p99": true,
+      "correctness": true
+    },
+    "pass": true,
+    "interpretation": "Run 3 has negative D90 and D99, and is retained rather than discarded. The specified acceptance rule is the median of three fresh-process paired differences, whose p50, p90, and p99 values all satisfy their thresholds."
+  },
+  "correctness_gates": {
+    "scope": "Every fresh process ran both pre-timing and post-timing comparison gates against an independent native state world.",
+    "required": [
+      "top-level close=true before and after timing",
+      "output finite and within the established comparison tolerance",
+      "compressed_kv, swa_kv, compressor_state, indexer_compressor_state, indexer_k, and indexer_scale all pass",
+      "indexer quantized comparison acceptable",
+      "indexer K raw values exact for this campaign",
+      "indexer scale bit-exact",
+      "native and candidate mutable caches/output remain disjoint"
+    ],
+    "observed_identically_in_all_three_processes": {
+      "pre_timing_close": true,
+      "post_timing_close": true,
+      "output": {
+        "close": true,
+        "finite": true,
+        "active_elements": 131072,
+        "max_abs_error": 0.036376953125,
+        "mean_abs_error": 0.003297442020371577
+      },
+      "compressed_kv_max_abs_error": 0.0078125,
+      "swa_kv_max_abs_error": 0.0,
+      "compressor_state_max_abs_error": 2.60770320892334e-08,
+      "indexer_compressor_state_max_abs_error": 2.2351741790771484e-08,
+      "indexer_k_max_abs_error": 0.0,
+      "indexer_scale_max_abs_error": 0.0,
+      "indexer_quantized_acceptable": true,
+      "indexer_raw_exact": true,
+      "indexer_scale_bit_exact": true,
+      "indexer_candidate_written_rows": 8,
+      "indexer_compared_k_elements": 1024
+    },
+    "pre_and_post_log_lines_sha256": "67b6f6fc73d4e8d0667ad25c90e3527a351f5c13ece7eff886a2afb752f2a1a8"
+  },
+  "candidate_optimizations": [
+    {
+      "name": "short-context direct index selection",
+      "source": "vllm_ascend/ops/_pypto_dsv4_csa/decode_indexer.py",
+      "behavior": "When visible compressed positions are no more than the 512-entry top-k width, emit the complete logical index set directly and leave the unused suffix at -1 instead of sorting a 4096-entry score row.",
+      "correctness_preserving_fallback": "When any relevant row exceeds 512 visible compressed positions, execute the original score and full top-k ranking path."
+    },
+    {
+      "name": "nine-task index-score dispatch predicate",
+      "source": "vllm_ascend/ops/_pypto_dsv4_csa/decode_indexer.py",
+      "gate_source": "need_index_score is produced by the already-required csa_rope_step metadata task in vllm_ascend/ops/_pypto_dsv4_csa/kernel.py",
+      "behavior": "Predicate-skip the six index-query transform tasks, two score-weight tasks, and one mixed score task when every row is on the direct-selection path. The indexer compressor/cache-write path remains active.",
+      "predicate_true_fallback": "A true gate dispatches all nine original score-producing tasks and retains the existing long-context result path."
+    },
+    {
+      "name": "qk valid-only work plan",
+      "source": "vllm_ascend/ops/_pypto_dsv4_csa/decode_sparse_attn_csa.py",
+      "behavior": "The device plan contains each mandatory seed block plus only valid optional sparse blocks. qk_pv reads the runtime valid-item count and each physical AIC lane walks only those items using the runtime core count."
+    }
+  ],
+  "runtime_scope_limits": {
+    "accepted_runtime": "tensormap_and_ringbuffer",
+    "accepted_mode": "aclgraph",
+    "host_build_graph_in_performance_acceptance": false,
+    "hbg_measurements_present": false,
+    "hbg_policy": "HBG has a separate resident-graph restore and scheduling cost model and is not part of this TRB steady-state pass/fail decision.",
+    "hbg_predicate_fallback_policy": "Current Simpler marks resident recording unsupported when it encounters the task predicate, abandons that resident recording attempt, and reruns the callable through ordinary orchestration. The ordinary runtime still evaluates the device predicate; the fallback is not a forced full-score path. No TRB resident-graph speedup or performance pass is inferred for HBG.",
+    "evidence_boundary": "This artifact establishes only A3 device0, B4/S8, ratio4, fixed captured-address TRB ACLGraph steady state. It does not establish other buckets, mature-context performance, dynamic-address replay, eager performance, HBG performance, or full-model throughput."
+  },
+  "diagnostic_limitations": {
+    "device_profiler_breakdown_available": false,
+    "failed_profiler_log": "/tmp/csa_trb_qk_valid_only_profile.log",
+    "failed_profiler_log_sha256": "6632f65b095e0da577f88766d6c1f2c5edbbfde1f27fd5e6e4ec1efd4c553d52",
+    "failure": "CANNTimelineParser, RelationParser, CANNAnalyzeParser, OperatorViewParser, TraceViewParser, KernelViewParser, TraceStepTimeParser, CommunicationParser, and DbParser failed; trace_view.json was truncated at byte 273324 and kernel_details.csv was missing, so the harness rejected the diagnostic run.",
+    "valid_for_acceptance_latency": false,
+    "valid_for_per_child_attribution": false,
+    "impact": "The three ABBA timing logs remain the acceptance evidence, but this campaign cannot attribute the residual or achieved gain to individual AICPU, AIC, AIV, dequeue, or barrier intervals from that failed profiler run."
+  }
+}
