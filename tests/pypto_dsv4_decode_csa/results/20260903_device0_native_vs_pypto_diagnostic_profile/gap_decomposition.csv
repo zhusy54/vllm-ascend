@@ -1,0 +1,15 @@
+metric,round1_us,round2_us,mean_us
+native_model_envelope,742.220,719.280,730.750
+pypto_model_envelope,818.300,780.460,799.380
+pypto_minus_native_model,76.080,61.180,68.630
+native_kernel_serial_sum,831.980,811.560,821.770
+native_stream_overlap,115.780,118.740,117.260
+native_interval_union,716.200,692.820,704.510
+native_global_idle,19.860,20.480,20.170
+native_compute_span,736.060,713.300,724.680
+pypto_aicore_kernel,790.960,757.760,774.360
+pypto_aicore_minus_native_serial_sum,-41.020,-53.800,-47.410
+pypto_aicore_minus_native_compute_span,54.900,44.460,49.680
+pypto_aicpu_scheduler,808.580,770.840,789.710
+pypto_aicpu_envelope_increment,17.620,13.080,15.350
+model_outer_residual,3.560,3.640,3.600

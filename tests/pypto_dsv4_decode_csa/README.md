@@ -444,6 +444,8 @@ backend-specific per-call 工作到最终 caller-stream quiesce 的 critical-pat
 
 Native 与 PyPTO 同轮采集的一套完整诊断 profiler 产物已汇聚到
 `results/20260903_device0_native_vs_pypto_diagnostic_profile/`。其中
+`operator_comparison_analysis.md` 给出算子级热点、双流 overlap 和 AICPU/AICore
+envelope 的完整差距闭合，
 `profiler_output/trace_view.json` 是 timeline 主入口，
 `profiler_output/kernel_details.csv` 用于 kernel 级拆分，目录内 README 记录测试口径、
 原始位置和哈希。该 profile 产生于最终三项优化之前，只能作为历史瓶颈归因证据；最终正式

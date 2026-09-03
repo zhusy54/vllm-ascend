@@ -6,6 +6,10 @@ context position 8191、ratio4，并在同一个 fresh process 中按 ABBA 顺�
 
 ## 主要入口
 
+- `operator_comparison_analysis.md`：Native/PyPTO 算子、双流 overlap、AICPU/AICore
+  envelope 和最终差距的完整闭合分析，应当先读这一份。
+- `native_operator_breakdown.csv`：Native 38 个可见算子的逐项耗时。
+- `gap_decomposition.csv`：两轮 MODEL 差距的机器可读闭合数据。
 - `profiler_output/trace_view.json`：完整时间线，可直接用于 timeline 分析。
 - `profiler_output/kernel_details.csv`：按 kernel 分解 Native 与 PyPTO device 时间。
 - `profiler_output/task_time.csv`：device task 明细。
