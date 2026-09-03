@@ -442,6 +442,13 @@ backend-specific per-call 工作到最终 caller-stream quiesce 的 critical-pat
 `steady_enqueue_batch_critical_path`；因此现有 eager 输出只用于归因诊断，不能据此形成正式
 性能 PASS。当前 fixed-binding ACLGraph 的同 stream `device_span` 不受这个缺口影响。
 
+Native 与 PyPTO 同轮采集的一套完整诊断 profiler 产物已汇聚到
+`results/20260903_device0_native_vs_pypto_diagnostic_profile/`。其中
+`profiler_output/trace_view.json` 是 timeline 主入口，
+`profiler_output/kernel_details.csv` 用于 kernel 级拆分，目录内 README 记录测试口径、
+原始位置和哈希。该 profile 产生于最终三项优化之前，只能作为历史瓶颈归因证据；最终正式
+性能结论仍以 `results/20260903_device0_trb_steady_state_performance.json` 为准。
+
 ### 6.4 短上下文 device gate 与 top-k 语义边界
 
 `need_index_score` 是 PyPTO program 内部的单元素 device tensor，不是新的

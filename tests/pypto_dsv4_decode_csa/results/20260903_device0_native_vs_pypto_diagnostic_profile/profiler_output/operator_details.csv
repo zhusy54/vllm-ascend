@@ -1,0 +1,37 @@
+Name,Input Shapes,Call Stack,Host Self Duration(us),Host Total Duration(us),Device Self Duration(us),Device Total Duration(us),Device Self Duration With AICore(us),Device Total Duration With AICore(us)
+csa_steady_state.native.enqueue,,"/home/developer/.local/lib/python3.11/site-packages/torch/_ops.py(1275): __call__;
+/home/developer/.local/lib/python3.11/site-packages/torch/autograd/profiler.py(873): __enter__;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(425): execute_profile_abba_rounds;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(559): _run_optional_steady_state_profile;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(1113): run_a3_single_op_benchmark;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(1213): main;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(1238): <module>;
+<frozen runpy>(88): _run_code;
+<frozen runpy>(198): _run_module_as_main",339.91,339.91,0,0,0,0
+csa_steady_state.pypto.enqueue,,"/home/developer/.local/lib/python3.11/site-packages/torch/_ops.py(1275): __call__;
+/home/developer/.local/lib/python3.11/site-packages/torch/autograd/profiler.py(873): __enter__;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(425): execute_profile_abba_rounds;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(559): _run_optional_steady_state_profile;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(1113): run_a3_single_op_benchmark;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(1213): main;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(1238): <module>;
+<frozen runpy>(88): _run_code;
+<frozen runpy>(198): _run_module_as_main",88.8,88.8,0,0,0,0
+csa_steady_state.pypto.enqueue,,"/home/developer/.local/lib/python3.11/site-packages/torch/_ops.py(1275): __call__;
+/home/developer/.local/lib/python3.11/site-packages/torch/autograd/profiler.py(873): __enter__;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(425): execute_profile_abba_rounds;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(559): _run_optional_steady_state_profile;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(1113): run_a3_single_op_benchmark;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(1213): main;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(1238): <module>;
+<frozen runpy>(88): _run_code;
+<frozen runpy>(198): _run_module_as_main",80.85,80.85,0,0,0,0
+csa_steady_state.native.enqueue,,"/home/developer/.local/lib/python3.11/site-packages/torch/_ops.py(1275): __call__;
+/home/developer/.local/lib/python3.11/site-packages/torch/autograd/profiler.py(873): __enter__;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(425): execute_profile_abba_rounds;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(559): _run_optional_steady_state_profile;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(1113): run_a3_single_op_benchmark;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(1213): main;
+/mnt/workspace/inductor/vllm-ascend/tests/pypto_dsv4_decode_csa/a3_single_op_benchmark.py(1238): <module>;
+<frozen runpy>(88): _run_code;
+<frozen runpy>(198): _run_module_as_main",81.12,81.12,0,0,0,0
