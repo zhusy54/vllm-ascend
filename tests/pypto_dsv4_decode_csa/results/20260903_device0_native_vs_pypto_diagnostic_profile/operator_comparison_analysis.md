@@ -170,6 +170,13 @@ Native 38 个算子的完整逐项数据见 `native_operator_breakdown.csv`。�
 
 ## 8. PyPTO 外层可观测分解
 
+![PyPTO ACLGraph 两轮 device 泳道图](pypto_device_swimlane.svg)
+
+该图将两轮 replay 都按各自 `MODEL_EXECUTE` 起点归一化，并使用完全相同的
+`0–820 us` 横轴，因此两轮 bar 长度可以直接比较。图中只绘制 profiler 确实记录的
+MODEL control、两次 DMA、AICPU scheduler 和 AICore kernel；`aicore_kernel_0` 内部
+child task 不可见。
+
 | 指标 | PyPTO #1 | PyPTO #2 | 两轮均值 |
 | --- | ---: | ---: | ---: |
 | AICPU scheduler | `808.580 us` | `770.840 us` | `789.710 us` |
@@ -211,6 +218,8 @@ kernel 变更做 fresh-process ABBA A/B，并用外层 AICore span 判断收益�
 - `benchmark_run.txt`：正式 100 样本结果、正确性门禁和 profiler 配置。
 - `gap_decomposition.csv`：本分析中的差距闭合数据。
 - `native_operator_breakdown.csv`：Native 38 个可见算子的逐项数据。
+- `pypto_device_swimlane.svg`：PyPTO 两轮 replay 的等比例 device 泳道图。
+- `generate_pypto_swimlane.py`：从原始 `task_time.csv` 重建泳道图的确定性生成器。
 
 计算使用十进制定点数读取 profiler 的巨大绝对时间戳，避免 binary float 消减误差。
 以下恒等式已逐轮复核：

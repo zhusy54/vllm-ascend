@@ -8,6 +8,8 @@ context position 8191、ratio4，并在同一个 fresh process 中按 ABBA 顺�
 
 - `operator_comparison_analysis.md`：Native/PyPTO 算子、双流 overlap、AICPU/AICore
   envelope 和最终差距的完整闭合分析，应当先读这一份。
+- `pypto_device_swimlane.svg`：PyPTO 两轮 replay 的等比例 device 泳道图。
+- `generate_pypto_swimlane.py`：从原始 `task_time.csv` 确定性重建该图。
 - `native_operator_breakdown.csv`：Native 38 个可见算子的逐项耗时。
 - `gap_decomposition.csv`：两轮 MODEL 差距的机器可读闭合数据。
 - `profiler_output/trace_view.json`：完整时间线，可直接用于 timeline 分析。

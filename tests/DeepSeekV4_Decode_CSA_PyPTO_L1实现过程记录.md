@@ -5621,3 +5621,50 @@ Qwen3 文件，也没有把这两个外部阻断写成“本任务 lint 失败�
 提交边界保持不变：本轮功能文件只属于 vLLM-Ascend，用户已有 Qwen3/worker/root issue
 改动不 stage；PyPTO 与 simpler 没有写入。许可证方案未关闭前，不把 private kernel
 源码提交成可发布 Apache-2.0 功能代码；允许单独形成文档/证据 checkpoint，且不默认 push。
+
+## 94. Native/PyPTO profiler 归档、算子分析与 PyPTO 泳道图
+
+用户要求将此前只位于 `/tmp` 的有效 Native/PyPTO 同轮 profiler 产物汇聚到仓库。原始
+`ASCEND_PROFILER_OUTPUT` 的 10 个文件和完整运行日志现保存在：
+
+`tests/pypto_dsv4_decode_csa/results/20260903_device0_native_vs_pypto_diagnostic_profile/`。
+
+目录包含 `trace_view.json`、`kernel_details.csv`、`task_time.csv`、operator/API 表、两份
+SQLite 数据库、运行日志、原始文件 `SHA256SUMS` 和口径 README。所有 11 个原始文件的
+SHA256 均与 `/tmp` 来源逐一一致；CANN CSV 原样保留 CRLF，并通过目录局部
+`.gitattributes` 标为 binary，避免 Git 转换原始字节。该归档阶段提交为 `cfa92e5`，没有
+push。
+
+第一次归档只有 raw artifact 和总量说明，缺少用户要求的具体算子对比，因此随后补充：
+
+- `operator_comparison_analysis.md`：MODEL、AICore、AICPU、双流 overlap 和外围差距闭合；
+- `native_operator_breakdown.csv`：两轮 Native 共 38 个可见算子的逐项配对；
+- `gap_decomposition.csv`：两轮差距的机器可读闭合数据。
+
+80 行原始 kernel 顺序为 38 Native、2 PyPTO、2 PyPTO、38 Native。逐项校验了 stream、
+profiler type、两轮 duration 和均值；同时验证每轮：
+
+```text
+Native compute span = kernel sum - overlap + global idle
+MODEL gap = AICore gap + AICPU envelope increment + outer residual
+```
+
+两轮均值最终闭合为 `68.630 us = 49.680 + 15.350 + 3.600 us`。其中 PyPTO AICore
+相对 Native 两流串行 kernel 和实际少 `47.410 us`，但 Native 双流隐藏
+`117.260 us`，再扣除 Native `20.170 us` global idle，形成 `49.680 us` AICore 净差距。
+该算子分析阶段提交为 `4487528`，同样没有 push。
+
+随后按用户要求增加 PyPTO device 泳道图：
+
+- `pypto_device_swimlane.svg`：两轮 replay 共用 `0–820 us` 横轴；
+- `generate_pypto_swimlane.py`：只依赖 Python 标准库，从原始 `task_time.csv` 确定性重建。
+
+每轮图包含 stream 44 的 `MODEL_EXECUTE/MODEL_WAIT_COMPLETE`、stream 10 的两次
+`MEMCPY_ASYNC` 与 `simpler_aicpu_l1_exec_*`、stream 9 的 `aicore_kernel_0`，并标出
+AICPU 相对 AICore 的 lead 和 completion tail。时间戳先用 `Decimal` 做巨大绝对值消减，
+再映射到像素，避免 binary float 导致约 `0.03–0.05 us` 的伪误差。生成器重复运行后
+SVG 哈希不变，XML、关键数值标签、Ruff、Markdown 和 `git diff --check` 均做门禁。
+
+图中没有伪造 PyPTO child 泳道：当前 CANN profiler 只暴露外层 AICPU scheduler 与
+`aicore_kernel_0`，不能看到其内部 child 的真实 start/end。若未来为 borrowed-device L1
+增加低开销 child DFX，可在保留本图作为外层基线的同时另增 child-level 泳道。
