@@ -313,7 +313,7 @@ nonzero eager 矩阵证明四 bucket 的算法与六状态精度。
   稳定、request admit/retire/compact/block reuse、output、六类 state 与 canary
   检查均通过。
 - 当所有 row 的可见压缩位置数都不超过 512 时，TRB 能由 device 上的
-  `need_index_score` gate 跳过 9 个 score-only task；该判定不需要 Host
+  `need_index_score` gate 跳过 6 个 score-only task；该判定不需要 Host
   读取 metadata，ACLGraph replay 时仍依据当次 device buffer 内容决定。
 - 当前 TRB ACLGraph 已有 3 个 fresh process 的正式同卡稳态 ABBA 结果；
   详细口径与数据见下文。
@@ -332,7 +332,41 @@ nonzero eager 矩阵证明四 bucket 的算法与六状态精度。
 - 同一 device 并发 replay 安全；
 - A5 或 simulator 可用。
 
-### 6.1 历史性能阶段（保留作为优化证据）
+### 6.1 正式稳态 benchmark 的 taskQueue 模式
+
+普通 eager 的生产 OpAPI V2 路径必须在一个全新进程中使用：
+
+```bash
+TASK_QUEUE_ENABLE=2 python -m tests.pypto_dsv4_decode_csa.a3_single_op_benchmark \
+  --runtime tensormap_and_ringbuffer \
+  --mode eager \
+  --device 0 \
+  --batch 4 \
+  --start-position 8191 \
+  --warmups 20 \
+  --samples 100
+```
+
+torch_npu 2.12 的 ACLGraph capture 路径必须另起全新进程并使用：
+
+```bash
+TASK_QUEUE_ENABLE=1 python -m tests.pypto_dsv4_decode_csa.a3_single_op_benchmark \
+  --runtime tensormap_and_ringbuffer \
+  --mode aclgraph \
+  --device 0 \
+  --batch 4 \
+  --start-position 8191 \
+  --warmups 20 \
+  --samples 100
+```
+
+runner 会在导入 `torch/torch_npu`、占用 runtime owner 或访问 device0 之前
+核对该环境变量；缺失或错配直接 fail-fast，不会在进程内偷偷改值。`=2`
+不能用于本环境的 ACLGraph capture，`=1` 的普通 eager 数字也不能冒充
+本轮要求的 OpAPI V2 dequeue 性能证据。TRB/HBG、eager/ACLGraph 均应分别
+使用 fresh process；诊断 profiler 沿用所属 mode 的同一个 taskQueue 值。
+
+### 6.2 历史性能阶段（保留作为优化证据）
 
 HBG 曾从历史默认 16384-task window 收缩到本 CSA 在 device0 证明
 容量足够的最小 2 次幂 window 128，当时同卡 ABBA 的 steady-state device
@@ -345,12 +379,14 @@ TRB 历史基线已有 native production-overlap、同卡 ABBA、100 样本
 p50/p90/p99 与 Host/device 拆栏。固定 24 个 qk_pv block 时 p50 为
 `0.821 ms`；改为 runtime 实际 20 个 AIC 后为 `0.800 ms`，同轮 native
 为 `0.645 ms`，当时仍慢约 24%。Host replay 双方都约 19 us。这些数字
-保留用于说明 runtime 核数修正带来的收益，但已被下文的短上下文
-device-gated 三轮 fresh-process 结果取代，不再代表当前代码的最终性能。
+保留用于说明 runtime 核数修正带来的收益，但已被下文的成熟上下文
+三轮 fresh-process 结果取代，不再代表当前代码的最终性能。
 
-### 6.2 当前 TRB ACLGraph 正式稳态结果
+### 6.3 当前 TRB ACLGraph 正式稳态结果
 
-当前正式性能口径为 B4/S8、TP1、ratio-4、device0、TRB ACLGraph。
+当前正式性能口径为 B4/S8、TP1、ratio-4、start-position 8191、device0、
+TRB ACLGraph。这是会执行完整 index score 路径的成熟上下文，不依赖短上下文
+`visible_len <= 512` 快路。
 每轮都启动一个全新 Python process，在同卡、同 caller stream 上对 native
 production（保持 multistream overlap）和 PyPTO 执行 ABBA 配对采样。每个
 process 使用 20 次 benchmark warmup 和 100 个正式 sample，每 20 次 enqueue
@@ -359,46 +395,68 @@ process 使用 20 次 benchmark warmup 和 100 个正式 sample，每 20 次 enq
 
 | fresh process | native p50/p90/p99 | PyPTO TRB p50/p90/p99 | paired D（native - PyPTO） |
 | --- | ---: | ---: | ---: |
-| run 1 | `633.460 / 639.878 / 643.3596 us` | `613.110 / 627.598 / 636.2278 us` | `+20.350 / +12.280 / +7.1318 us` |
-| run 2 | `645.020 / 652.750 / 655.9724 us` | `628.720 / 644.216 / 650.9402 us` | `+16.300 / +8.534 / +5.0322 us` |
-| run 3 | `625.040 / 630.470 / 633.4008 us` | `619.290 / 632.836 / 642.3964 us` | `+5.750 / -2.366 / -8.9956 us` |
-| 三轮中位配对差 | — | — | `+16.300 / +8.534 / +5.032 us` |
+| run 1 | `727.460 / 734.704 / 737.949 us` | `705.870 / 718.912 / 730.880 us` | `+21.590 / +15.792 / +7.068 us` |
+| run 2 | `724.700 / 732.510 / 736.001 us` | `711.400 / 724.110 / 732.607 us` | `+13.300 / +8.400 / +3.394 us` |
+| run 3 | `712.550 / 718.186 / 724.581 us` | `700.280 / 709.086 / 717.236 us` | `+12.270 / +9.100 / +7.345 us` |
+| 三轮中位配对差 | — | — | `+13.300 / +9.100 / +7.068 us` |
 
 `D` 先在每个 fresh process 内按同一分位做 `native - PyPTO`，再对
 3 个 process 的 `D` 取中位数；它不是将两组跨进程原始样本混合，
-也不是“两个跨进程中位数再相减”。正值表示 PyPTO 更快。run 3 的
-p90/p99 反向落后仍原样保留；三轮中位配对差分别为
-`+16.300/+8.534/+5.032 us`，三项均满足预先定义的门槛，因此当前结论是
-“TRB ACLGraph 的 B4/S8 稳态验收通过”。这个结论不应外推为所有 bucket、
-长上下文、HBG 或完整模型吞吐均已超过 native。
+也不是“两个跨进程中位数再相减”。正值表示 PyPTO 更快。三个 fresh process
+在三个分位点上全部为正；三轮中位配对差分别为
+`+13.300/+9.100/+7.068 us`，满足 `D50 > 0`、`D90 >= 0`、`D99 >= 0`
+的预先门槛，因此当前结论是“TRB ACLGraph 的 B4/S8/C8191 固定 binding
+稳态验收通过”。这个结论不应外推为 B8/B12/B16 性能、动态 binding、HBG
+性能或完整模型吞吐均已超过 native。
 
-计时明确不包含首次 JIT/program 编译、PTOAS/codegen、binary/context
-prepare、weight pack、ordinary warmup、benchmark warmup、ACLGraph capture、捕获
-地址上的首次 replay、初始 structure-cache/event-pool 建立以及 correctness
-golden 生成/对比等一次性成本。计时包含 taskQueue consumer dequeue/launch、
-device scheduler 与 kernel 执行。如果真实常态调用因 tensor 地址或 scalar
+最终收益来自三项可独立审计的冷/热路径改造组合：`wo_b` 在 weight prepare
+阶段重排成 `[G, D/N, K/BK, N, BK]` tile-major 物理顺序，使 PB 的
+`[256, 256]` cube weight tile 使用连续 GM stride；projection group 按
+`[6, 7, 4, 5, 2, 3, 0, 1]` 提交以适配实测的 sibling LIFO-like 调度和
+merge `3→2→1→0` ready 顺序；indexer 将 `idx_qr_proj_dequant` 与 `qr_rope`
+融合成一个 AIV child，删除约 1 MiB FP32 `qr_proj` GM 中间态和一个 task
+barrier。前两项不改数学归约顺序，第三项保留 native BF16 rounding 边界。
+代价是每 layer 冷准备并由 owner 额外 pin 一份约 64 MiB 的 tile-major `wo_b`；
+这不进入稳态样本，但属于产品显存预算，不能忽略。
+
+计时明确不包含首次 JIT/program 编译、PTOAS/codegen、binary 注册、物化与加载、
+runtime/context/owner/callable 创建和 prepare、weight pack/preparation、ordinary eager、
+ACLGraph 及正式 benchmark 的全部 warmup、ACLGraph capture/build、最终采样地址上的
+首次 ordinary invocation/replay、一次性 structure/binding-cache 与 event/runtime-handle
+初始化，以及 correctness golden 生成、执行、对比和 validation-only copy。上述工作必须
+全部结束并由 caller quiesce 后才能进入 `SamplingPhase.SAMPLE`。计时包含 production
+validation、tensor address/scalar patch、taskQueue producer enqueue 与 consumer dequeue/launch、
+AICPU/AICore scheduler、kernel execution，以及 workload 反复触发的 binding-cache
+replacement/miss。如果真实常态调用因 tensor 地址或 scalar
 变化反复产生 address/scalar patch 或 cache miss，这些都必须留在稳态口径内，
 不得追认为“首次成本”剔除。本轮 ACLGraph 采样固定 captured tensor/scalar
 binding，因此没有额外伪造每次 replay 的地址变化；后续若用变地址/变
 scalar workload 验收，其 patch/cache-miss 必须原样计入。
 
-### 6.3 短上下文 device gate 与 top-k 语义边界
+因此本节的 `device_span` 只证明固定 captured binding。动态地址/scalar 场景如果
+存在 start event 之前的 Host patch，正式主指标改用整个稳态 enqueue batch 从首次
+backend-specific per-call 工作到最终 caller-stream quiesce 的 critical-path 除以调用
+数；Host enqueue 与 device span 仍单独报告，但不能相加。
+
+当前 runner 尚未产出包含最终 caller-stream quiesce 的 eager
+`steady_enqueue_batch_critical_path`；因此现有 eager 输出只用于归因诊断，不能据此形成正式
+性能 PASS。当前 fixed-binding ACLGraph 的同 stream `device_span` 不受这个缺口影响。
+
+### 6.4 短上下文 device gate 与 top-k 语义边界
 
 `need_index_score` 是 PyPTO program 内部的单元素 device tensor，不是新的
 public ABI 参数。它由本来就必须执行的 `csa_rope_step` 产生，其
-TaskId 作为 predicate dependency 传给下列 9 个 score-only task：
+TaskId 作为 predicate dependency 传给下列 6 个 score-only task：
 
 1. `idx_qr_proj_matmul`；
-2. `idx_qr_proj_dequant`；
-3. `qr_rope_swap_idx`；
-4. `qr_rope`；
-5. `qr_hadamard_matmul`；
-6. `qr_hadamard_quant`；
-7. `weights_proj`；
-8. `weights_proj_reduce`；
-9. `score`。
+2. `idx_qr_dequant_rope`（dequant、native BF16 rounding 与 RoPE 融合）；
+3. `qr_hadamard_quant_mixed`（Hadamard matmul、native rounding、amax 与
+   int8 quant 合并为一个 mixed child）；
+4. `weights_proj`；
+5. `weights_proj_reduce`；
+6. `score`。
 
-只有当所有 request 的最大 `visible_len <= 512` 时，这 9 个 task 才整体
+只有当所有 request 的最大 `visible_len <= 512` 时，这 6 个 task 才整体
 跳过；任意 request 越界就保守地执行完整 score 路径。
 `indexer_compressor` 仍必须执行，因为它负责本 decode step 的 index cache/state
 更新，不属于 score-only 工作。边界是可见压缩位置数而不是某个
@@ -417,11 +475,11 @@ position 2047–2050 的可见长度仍为 512，position 2051 才变为 513；
 不应把 raw top-k 顺序相等作为契约。浮点累加次序不同仍可能产生容差
 范围内的尾数差异，不应将 selection-set 等价误写为 bit-exact 输出。
 
-### 6.4 HBG 当前只作功能回归
+### 6.5 HBG 当前只作功能回归
 
 当前 Simpler HBG record path 尚未把 predicate 编码为可 replay 的 HBG node；
 遇到 predicate 时会走 ordinary fallback，因此不能用它衡量本轮“在图中
-跳过 9 个 score-only task”的稳态收益。基于这一实现边界，当前正式
+跳过 6 个 score-only task”的稳态收益。基于这一实现边界，当前正式
 性能验收固定为 **TRB ACLGraph**；HBG 只保留 eager/ACLGraph 数值、状态、
 owner 和 replay 生命周期的功能回归。在 HBG 实现原生 predicate record/replay 前，
 任何 HBG 性能数字都不能与 TRB 快路直接合并或用于当前胜负结论。

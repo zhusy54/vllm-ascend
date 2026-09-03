@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档性质 | 实现前开发计划、测试设计与验收依据 |
+| 文档性质 | 开发计划、测试设计、执行状态与验收依据 |
 | 目标硬件 | Ascend A3，仅覆盖 A2/A3 runtime 路径；本阶段不覆盖 A5/A5 simulator |
 | 可用环境 | 单机双卡 A3；主验证采用单卡 TP1，另一张卡仅用于并行生成数据或独立调试 |
 | 目标场景 | DeepSeek V4 Flash 的 decode CSA，不部署完整模型，不验证 prefill/MoE/sampler |
@@ -16,7 +16,7 @@
 | 默认 workload | DSpark target verify，`S=8`（1 个 target token + 7 个 draft token） |
 | 静态 bucket | `B4/B8/B12/B16`，对应 `T=B*S=32/64/96/128`；每个 bucket 是独立 L1 specialization |
 | 默认子图 | 4 个真实尺寸、独立权重和独立 cache 的 CSA layer |
-| 文档状态 | 设计完成，等待分阶段实现和 A3 上板闭环 |
+| 文档状态 | 主体实现与 A3 单算子闭环完成；B4/S8/C8191 TRB ACLGraph 稳态性能通过；发布提交等待许可证处理 |
 
 本文档中的“native”是指当前 vLLM-Ascend 的 DeepSeek V4 DSA/CSA 实现；“PyPTO”是指新的 PyPTO L1 backend；“CSA Capsule”是本文设计的、有状态但不包含完整 vLLM Engine 的 decode CSA 子图运行器。
 
@@ -211,7 +211,7 @@ PyPTO L1 的完整设计与实现记录位于：
 - 四层之间不发生 layer-name、weight、func-id、cache 或 metadata 串扰。
 - mixed backend 的最终输出与对应逐层 reference 一致。
 
-## 3.3 性能目标
+## 3.3 稳态性能目标（不计首次编译和任何 warmup）
 
 功能性开发全部闭环后，本计划继续进行尽力而为的性能优化，最终目标是在
 **相同 workload、相同正确性门禁、同一张 A3、native production 默认优化保持开启**
@@ -241,24 +241,35 @@ profiler 拆解：
 数据单独记录，不进入胜负样本：
 
 - 首次 program 编译和 PTOAS/codegen；
-- binary 注册、materialize/加载；
+- binary 注册、materialize 和加载；
 - runtime/context/owner 创建、prepare 和一次性 callable 准备；
-- weight pack；
-- 全部 ordinary warmup 和 ACLGraph warmup；
-- ACLGraph capture；
+- weight pack 和 preparation；
+- ordinary eager、ACLGraph 及正式 benchmark 的全部 warmup；
+- ACLGraph capture 和 graph build；
 - 在最终采样地址上的第一次 ordinary invocation 或第一次 replay；
 - 一次性 structure-cache/binding-cache 填充和 event pool/handle 初始化；
-- correctness golden 生成、执行与比较。
+- correctness golden 生成、执行、比较以及 validation-only copy。
 
 进入 `SAMPLE` 前必须由 caller 外部同步并 quiesce，确认上述任务均已结束；
 不能只是 Host 代码已经返回。
 
-每个稳态样本中真实发生的参数校验、tensor 地址/scalar patch、taskQueue
+正常服务调用路径中真实发生的参数校验、tensor 地址/scalar patch、taskQueue
 enqueue/dequeue、AICPU/AICore device scheduler 和 kernel execution 均属于被测路径
-的必要成本，必须进入主胜负口径；允许拆栏报告，但不允许从主指标中删除。
+的必要成本，必须进入主胜负口径；允许拆栏报告，但不允许从主指标中删除。固定
+captured binding 的 ACLGraph replay 本来不发生 Python 侧地址/scalar patch，因此
+不要求为它人为伪造一次 patch；这类结果也只能证明固定 binding 的稳态性能。
 真实稳态 workload 若持续改变 tensor 地址或 scalar，并因此反复发生 patch、
 binding-cache 替换或 cache miss，这些反复成本必须保留在对应样本中；只有最终
 采样工作集的首次 binding/一次性结构 cache 建立可以归入冷启动。
+
+固定 captured binding 的正式主指标继续使用完整 replay 外围的同 caller-stream
+`device_span`。如果待验收调用真实存在 start event 入队之前的 Host validation、
+地址/scalar patch 或 cache lookup，则不得把 `host_enqueue` 与 `device_span` 相加（两者
+可能重叠）；该场景改用稳态 batch critical-path 作为主指标：从 batch 第一个调用的
+backend-specific per-call 工作开始计时，到最后一个调用在 caller stream 上 quiesce
+结束，扣除双方完全等量的 fixture 内容更新后除以调用数。同时保留 `host_enqueue`
+和 `device_span` 作为归因子指标。这样既覆盖 Host patch，也不会重复计算 Host/device
+重叠时间。
 
 正式达标必须对每个准备宣称达标的目标 `(runtime, mode, workload)` 使用至少
 **3 个相互独立的 fresh Python process** 重复实验。每个 process 内 native 与
@@ -1331,53 +1342,65 @@ tests/
 
 ## 15.1 接口与生命周期
 
-- [ ] production custom-op schema 未因 PyPTO 改变。
-- [ ] PyPTO backend 使用 caller stream 和 taskQueue adapter。
-- [ ] capture/replay 内无 compile、prepare、alloc、H2D staging 或 sync。
-- [ ] warmup 是 capture 前显式流程，未 warmup capture 明确报错。
-- [ ] graph/context/binary/tensor owner 生命周期有测试覆盖。
-- [ ] 不调用 BinaryUnLoad，不调用 `rtStreamAddToModel`，不查询 capture handle。
-- [ ] TRB 与 HBG 的正式证据分别来自新进程，不依赖同进程 runtime 切换。
-- [ ] 正式 kernel/adapter 只来自 `vllm_ascend/ops/_pypto_dsv4_csa/`，运行时不导入 pypto-lib 或 tests 内 kernel。
+- [x] production custom-op schema 未因 PyPTO 改变。
+- [x] PyPTO backend 使用 caller stream 和 taskQueue adapter。
+- [x] capture/replay 内无 compile、prepare、alloc、H2D staging 或 sync。
+- [x] warmup 是 capture 前显式流程，未 warmup capture 明确报错。
+- [x] graph/context/binary/tensor owner 生命周期有测试覆盖。
+- [x] 不调用 BinaryUnLoad，不调用 `rtStreamAddToModel`，不查询 capture handle。
+- [x] TRB 与 HBG 的正式证据分别来自新进程，不依赖同进程 runtime 切换。
+- [x] 正式 kernel/adapter 只来自 `vllm_ascend/ops/_pypto_dsv4_csa/`，运行时不导入 pypto-lib 或 tests 内 kernel。
 
 ## 15.2 功能与精度
 
-- [ ] `decode_csa_core` 与旧宽边界 program 对齐。
-- [ ] native/PyPTO 单 op 输出与全部 cache 对齐。
-- [ ] 默认四层 `PPPP` 对齐 `NNNN`。
-- [ ] `NPNP` 与 `PNPN` 正确。
+- [x] `decode_csa_core` 与旧宽边界 program 对齐。
+- [x] native/PyPTO 单 op 输出与全部 cache 对齐。
+- [x] 默认四层 `PPPP` 对齐 `NNNN`。
+- [x] `NPNP` 与 `PNPN` 正确。
 - [ ] B4/B8/B12/B16 的静态 entry、artifact metadata 和运行结果正确。
-- [ ] 六类 mutable cache/state 均声明为 `InOut` 并逐步比较。
-- [ ] 真实 A3 page-strided cache 直接执行正确，无 contiguous mirror 或跨 page flatten。
-- [ ] indexer scale 使用 FP16 storage ABI，读写和容差正确。
-- [ ] padded request 不写 cache。
-- [ ] request retire/block reuse 正确。
+- [x] 六类 mutable cache/state 均声明为 `InOut` 并逐步比较。
+- [x] 真实 A3 page-strided cache 直接执行正确，无 contiguous mirror 或跨 page flatten。
+- [x] indexer scale 使用 FP16 storage ABI，读写和容差正确。
+- [x] padded request 不写 cache。
+- [x] request retire/block reuse 正确。
 - [ ] 128 step 无 state 泄漏和异常误差增长。
+
+四 bucket 的最终源码均有 fresh compile artifact；B4 与 B16 有最终组合后的
+nonzero A3 运行，B8/B12 只有较早版本的 nonzero 结果和最终源码 compile，因此第一项
+保持未勾选。32-step TRB/HBG churn 已通过；128-step 被 native 长前置执行引发的
+SoC state 问题阻断，不能用短化或 reset 掩盖，最后一项保持未勾选。
 
 ## 15.3 ACLGraph
 
-- [ ] TRB eager/capture/replay 通过。
-- [ ] HBG eager/capture/replay 通过。
-- [ ] warmup/capture 换 stream 通过。
-- [ ] 多 graph 同时存活、串行 replay 通过。
-- [ ] destroy 一张 graph 不影响另一张。
-- [ ] HBG 第二次及后续 replay 正确恢复 execution state。
+- [x] TRB eager/capture/replay 通过。
+- [x] HBG eager/capture/replay 通过。
+- [x] warmup/capture 换 stream 通过。
+- [x] 多 graph 同时存活、串行 replay 通过。
+- [x] destroy 一张 graph 不影响另一张。
+- [x] HBG 第二次及后续 replay 正确恢复 execution state。
 
 ## 15.4 性能证据
 
-- [ ] native serial 与 production overlap baseline 均存在。
+- [x] native serial 与 production overlap baseline 均存在。
 - [ ] 单 op、四层 Capsule、continuous trace 三种口径齐全。
-- [ ] 每个目标配置至少 3 个 fresh process，每轮同卡、同 caller stream、
+- [x] 每个正式声明达标的目标配置至少 3 个 fresh process，每轮同卡、同 caller stream、
   ABBA 交替测量，每个 backend 至少 20 次 warmup 和 100 个 sample。
-- [ ] native/PyPTO 使用同一 workload/输入、等价初始 state 和相同正确性门禁；
+- [x] native/PyPTO 使用同一 workload/输入、等价初始 state 和相同正确性门禁；
   native production overlap 保持开启。
-- [ ] 报告 p50/p90/p99，且 `D = native - PyPTO` 满足
+- [x] 报告 p50/p90/p99，且 `D = native - PyPTO` 满足
   `median(D50) > 0`、`median(D90) >= 0`、`median(D99) >= 0`。
 - [ ] Host enqueue、taskQueue dequeue、device span、graph replay 分开报告。
-- [ ] 冷启动排除项和稳态必计项严格遵循 §3.3，没有用缩略口径改变正式结论。
+- [x] 冷启动排除项和稳态必计项严格遵循 §3.3，没有用缩略口径改变正式结论。
 - [ ] 稳态中重复的地址/scalar patch 和 cache miss 均在样本内，没有被扩大
   warmup 或事前遍历工作集掩盖。
-- [ ] profiler 证明没有隐藏同步或跨算子 early orchestration。
+- [x] profiler 与源码审计证明没有隐藏同步或跨算子 early orchestration。
+
+当前正式 PASS 只针对 fixed-binding B4/S8/C8191 TRB ACLGraph；paired
+`D50/D90/D99` 三轮中位数为 `+13.300/+9.100/+7.068 us`。四层与 continuous
+trace 尚未形成同等级正式性能结果，动态地址/scalar churn 也未按完整 Host-to-quiesce
+critical path 验收，因此对应三项保持未勾选。ACLGraph 的 `graph_replay` 与
+`host_enqueue` 是同一 producer 操作，device span 已覆盖 consumer dequeue；
+尚无可靠的独立 dequeue-only 指标，所以不把“分开报告”伪标完成。
 
 ## 16. 风险清单与应对
 
@@ -1443,34 +1466,39 @@ tests/
 
 ### 开始实现前
 
-- [ ] 确认 A3 device 空闲。
-- [ ] 记录五个相关仓库/子模块 commit。
-- [ ] 修复 PyPTO extension/source hash 和 `libstdc++` ABI 环境。
-- [ ] 确认当前 dirty worktree 中用户改动并避开覆盖。
-- [ ] 确认首轮采用 B4、S8、TP1、A3，并准备 B8/B12/B16 静态 spec。
-- [ ] 确认正式源码位于 `_pypto_dsv4_csa/`、测试支持位于 `tests/pypto_dsv4_decode_csa/`，pypto-lib 保持只读。
-- [ ] 从真实 A3 cache tuple 记录六类 shape/dtype/stride/page stride，确认 indexer scale 为 FP16。
+- [x] 确认 A3 device 空闲。
+- [x] 记录五个相关仓库/子模块 commit。
+- [x] 修复 PyPTO extension/source hash 和 `libstdc++` ABI 环境。
+- [x] 确认当前 dirty worktree 中用户改动并避开覆盖。
+- [x] 确认首轮采用 B4、S8、TP1、A3，并准备 B8/B12/B16 静态 spec。
+- [x] 确认正式源码位于 `_pypto_dsv4_csa/`、测试支持位于 `tests/pypto_dsv4_decode_csa/`，pypto-lib 保持只读。
+- [x] 从真实 A3 cache tuple 记录六类 shape/dtype/stride/page stride，确认 indexer scale 为 FP16。
 
 ### 每个 Phase 结束
 
-- [ ] 更新本计划中的实际结论和偏差。
-- [ ] 运行对应 Host UT。
-- [ ] 运行对应 A3 ST。
-- [ ] 保存完整命令、日志、结果和 profiler。
-- [ ] 检查没有新增 capture 内 allocation/sync。
+- [x] 更新本计划中的实际结论和偏差。
+- [x] 运行对应 Host UT。
+- [x] 运行对应 A3 ST。
+- [x] 保存完整命令、日志、结果和 profiler。
+- [x] 检查没有新增 capture 内 allocation/sync。
 - [ ] 阶段性 commit；没有用户明确要求时不 push。
 
 ### 宣布任务完成前
 
 - [ ] 所有验收项有可追踪证据。
-- [ ] native/PyPTO 使用相同 workload 和初始 state。
-- [ ] 性能在同卡交替测量。
-- [ ] 所有 mutable state 都已比较。
-- [ ] TRB/HBG 均有 ACLGraph 多次 replay 结果。
-- [ ] TRB/HBG 结果来自独立新进程并记录各自退出状态。
-- [ ] B4/B8/B12/B16 均有静态 artifact metadata 与正确性证据。
-- [ ] page-strided cache、FP16 indexer scale 和六类 InOut 均有专项测试证据。
-- [ ] 报告明确写出未覆盖完整 Engine 和完整模型。
+- [x] native/PyPTO 使用相同 workload 和初始 state。
+- [x] 性能在同卡交替测量。
+- [x] 所有 mutable state 都已比较。
+- [x] TRB/HBG 均有 ACLGraph 多次 replay 结果。
+- [x] TRB/HBG 结果来自独立新进程并记录各自退出状态。
+- [ ] B4/B8/B12/B16 均有静态 artifact metadata 与最终源码 nonzero 正确性证据。
+- [x] page-strided cache、FP16 indexer scale 和六类 InOut 均有专项测试证据。
+- [x] 报告明确写出未覆盖完整 Engine 和完整模型。
+
+阶段性 commit 当前被许可证/NOTICE/provenance 决策阻断，而不是遗忘。未完成验收项
+具体为 B8/B12 最终组合 nonzero A3、128-step native 长前置状态问题、动态 binding
+性能、四层/trace 正式性能和完整 Engine（后者本来就是非目标）；它们都在 §15 和
+过程记录第 92 节逐项保留，不能因为单算子性能达标而自动勾选。
 
 ## 20. 推荐的首条实现路径
 

@@ -3980,9 +3980,9 @@ HBG 编译在 `/tmp/csa_hbg_final_qk_valid_correctness4.log` 明确失败：`til
 - 最终采样地址组合上的第一次 ordinary invocation/replay；
 - 一次性 structure/template cache population；
 - event pool、handle 等一次性初始化；
-- correctness golden 的创建和比较。
+- correctness golden 的创建、执行和比较。
 
-每个正式稳态样本仍必须完整包含：
+正常服务调用在某个正式稳态样本中实际发生时，以下成本必须完整包含：
 
 - 真实 per-call 参数、dtype/shape/stride/device 校验；
 - tensor 地址和 scalar patch；
@@ -3994,7 +3994,14 @@ HBG 编译在 `/tmp/csa_hbg_final_qk_valid_correctness4.log` 明确失败：`til
 稳态工作的一部分，不能继续称为 warmup 后排除。地址 churn benchmark 必须固定地址
 序列、working-set 和 cache capacity；只允许把 native/PyPTO 共用、与 backend 无关
 且完全相同的 fixture 输入内容更新放到共同计时边界外，任何 PyPTO 专属 metadata
-生成、绑定或 patch 都必须计入。最终三进程结果按这一口径取得并已经超过 native。
+生成、绑定或 patch 都必须计入。固定 captured binding 的 replay 本来不发生 Python
+侧 patch，不需要人为伪造，但它也不能作为动态地址/scalar churn 的性能证据。
+
+当前最终三进程结果是在上述口径的固定 B4/S8 captured binding 子集上取得并超过
+native：其主指标是完整 replay 外围的同 stream `device_span`。后续动态地址/scalar
+场景若有发生在 start event 入队前的 Host 工作，主指标必须改为“第一个
+backend-specific per-call 工作开始到 batch 最后一次 caller-stream quiesce”的完整
+critical-path 除以调用数；`host_enqueue` 与 `device_span` 只作并列归因，不能相加。
 
 ## 65. 最终静态回归、结果固化与提交边界
 
@@ -4085,3 +4092,1532 @@ merge 未初始化读；两个 blockDim=1 的 Tensor slice 都由恒为 0 的 bl
 
 静态测试当前以源码/合同断言为主，尚未生成并解析每个 bucket 的完整 IR/DAG 来验证
 所有 dependency。这是后续回归增强项，不改变本轮已有的 TRB/HBG 真机正证据。
+
+## 66. 长上下文 steady-state 瓶颈复核
+
+短上下文的 device predicate 快路已按三 fresh-process 口径超过 native，但这不能代表
+必须执行完整 index score 链的成熟上下文。为避免把首次编译或 warmup 噪声误判为
+算法成本，本节所有数字都在 compile/prepare/capture、最终地址首次 replay 和至少
+20 次 benchmark warmup 之后采集；正式样本仍为 100 次，并保持同 device0、同 caller
+stream、native production overlap 开启及 ABBA 顺序。
+
+### 66.1 mature-8191 基线和 qk 排序
+
+在 `start_position=8191`、B4/S8、TRB ACLGraph 上，valid-only QK 优化后的基线日志为：
+
+`/tmp/csa_trb_qk_valid_only_mature8191_abba_w20_s100.log`
+
+结果为 native `717.400/724.412/729.285 us`，PyPTO
+`874.760/890.418/917.363 us`，p50 仍落后 `157.360 us`。将 QK work queue 按估算
+cost 做平衡排序后，日志
+`/tmp/csa_trb_qk_cost_balanced_mature8191_abba_w20_s100.log` 得到 native
+`713.110/720.346/724.543 us`、PyPTO `852.770/868.310/884.860 us`。该排序保留：
+它没有改变任务集合或数学语义，PyPTO p50 改善约 `21.990 us`。
+
+### 66.2 profiler 说明剩余差距不是 Host dequeue
+
+随后对 cost-balanced 版本执行 msprof，artifact 为：
+
+`/tmp/csa_trb_m32_cost_balanced_msprof.9PUDyk/PROF_000001_20260903042135500_02926713RDIJRKLH`
+
+同一 profile 中 model 48 是 PyPTO、model 49 是 native，各有 121 次 replay。稳态外层
+p50 约为 `862.82 us` 对 `718.76 us`。PyPTO AICPU scheduler p50 约
+`852.92 us`，其 AICore parent span 约 `836.42 us`，scheduler 尾部约
+`14–16 us`；Host/SQ 差距只有约 `2 us`，不能解释百微秒级差异。
+
+native 两条工作 stream 的单独 union 约为 `164.40 us` 和 `673.36 us`，串行和约
+`835.90 us`，但两流真实 overlap 约 `129.18 us`，最终 union 约 `709.70 us`。
+PyPTO 的 `836.42 us` 与 native 两流串行和非常接近。因此当前最强证据是：成熟上下文
+的主要差距来自 PyPTO 单 scheduler DAG 没有兑现 native 两流的同等 overlap，而不是
+Python enqueue、taskQueue dequeue 或一次性 JIT。由于 profiler 不展开 PyPTO child
+内部的完整独立 timeline，这仍标记为强推断而非直接逐 child 证明。
+
+### 66.3 score task 分组搜索
+
+为减少 score mixed child 的调度和 GM 中间开销，依次测试了 token grouping、lane
+split 和 cross-core slot。以下均为单 fresh-process 方向性 A/B，不冒充三进程正式
+验收：
+
+| 方案 | native p50/p90/p99 | PyPTO p50/p90/p99 | 结论 |
+| --- | ---: | ---: | --- |
+| group2, tile32, split2, slot2 | `709.550/715.980/732.055` | `807.510/825.468/849.371` | 有改善但仍有较多 task |
+| group4, tile32, split2, slot2 | `728.780/735.444/738.586` | `806.230/819.296/830.230` | p50 再改善 |
+| group4, split4, slot2 | — | `810.160/826.524/841.005` | 比 split2 退化 |
+| group4, split5, slot2 | — | `806.060/816.450/833.087` | 接近但不占优 |
+| group8, tile16, split5, slot2 | `710.850/717.282/720.040` | `815.800/830.204/848.803` | 小 tile 退化 |
+| group8, tile32, split5, slot1 | `733.120/739.106/747.236` | `804.090/819.786/834.084` | 当时最佳，保留为基线 |
+| group8, tile32, split5, slot2 pair-cast | `728.910/735.844/741.067` | `810.340/820.140/833.050` | pairwise cast 退化，已撤销 |
+
+group8/tile32/split5/slot2 的 full-width value 会超过 A2/A3 Vec 容量；slot1 将每个
+logical block 的 pipe value 限制在 `64 KiB`，可以编译并减少 task 数。因此 score
+最终保留 group8、tile32、5-way lane 和 slot1，pairwise cast 实验不保留。
+
+在 gate 边界附近做了额外因果检查。`start_position=2039`（完整 score 未启用）时，
+native `689.120/696.928/700.593 us`、PyPTO `681.820/693.300/701.646 us`；
+`start_position=2047`（完整 score 启用）时，native
+`709.620/718.252/722.667 us`、PyPTO `773.080/782.452/795.013 us`。打开 score 链使
+PyPTO p50 增加约 `91.260 us`，native 只增加约 `20.500 us`，进一步确认成熟上下文
+差距集中在 indexer score DAG。临时绕过 top-k 后 PyPTO 只有约 `6 us` 改善，说明
+top-k 不是主要瓶颈；该诊断改动已撤销。
+
+## 67. Hadamard matmul 与 quant mixed-child 融合
+
+### 67.1 融合方式与数值合同
+
+原 DAG 将 `qr_hadamard_matmul` 的 FP32 累加结果写入 GM，再由
+`qr_hadamard_quant` 重读并量化。当前实现删除这一 GM handoff，将两者合并为
+`qr_hadamard_quant_mixed`：
+
+1. AIC 执行 `qr_bf16 @ hadamard -> FP32`；
+2. AIV 在片上严格执行旧实现的
+   `FP32 -> BF16(rint) -> FP32 -> *1/sqrt(128) -> BF16(rint) -> FP32`；
+3. 为绕开 A2/A3 上 full-128 `row_max` 的 blocked-layout 限制，对两个 64-column
+   half 分别取绝对值最大值后合并；
+4. 使用旧合同的 epsilon、`127/amax`、reciprocal dequant scale，随后按
+   `FP32 -> INT32(rint) -> FP16(round) -> INT8(trunc)` 量化；
+5. 直接产出后续 score 消费的 `qr_hadamard_i8` 和 scale，不再持有 FP32 GM
+   `qh_acc`。
+
+第一次尝试对 128 列直接 `row_max`，在
+`/tmp/csa_trb_group8_hadamard_quant_mixed_threshold2047_smoke.log` 编译失败：后端仍
+保留 64-wide blocked result，无法 reshape 为每行一个 scalar。改为两半归约后，
+`/tmp/csa_trb_group8_hadamard_quant_mixed_halves_threshold2047_smoke.log` 完成 TRB
+ACLGraph capture/replay，output 与六类 state 均通过。生成 AIV 地址高水位约
+`147,968 B`，低于 A2/A3 的 `188,416 B` Vec 安全上限；AIC 的 Mat/Left/Right/Acc
+也均在容量内。
+
+当前静态 assert 约束 matmul/quant 行 tile 一致、128 head dim 可被 64-column half
+整除、总 head row 可被 quant tile 整除。gate 直接依赖由原来的 9 个 score-only
+child 降为 8 个，静态合同测试同步检查新的 mixed child 名称和依赖。
+
+### 67.2 性能结果
+
+在 `start_position=2047`，slot2 融合版日志
+`/tmp/csa_trb_group8_hadamard_quant_mixed_halves_threshold2047_abba_w20_s100.log`
+得到 native `716.400/722.690/735.0762 us`、PyPTO
+`756.630/769.316/780.3056 us`；相对融合前同边界的 PyPTO p50
+`782.452 us` 改善 `25.822 us`。
+
+在 `start_position=8191`，slot2 日志
+`/tmp/csa_trb_group8_hadamard_quant_mixed_halves_mature8191_abba_w20_s100.log`
+得到 native `716.160/723.246/724.467 us`、PyPTO
+`792.020/803.990/825.111 us`；相对融合前 group8 基线的 PyPTO p50
+`819.786 us` 改善 `27.766 us`。最终 indexer K/scale 与 native 继续 bit-exact，
+output 和其余 state 通过原有正确性门禁。
+
+将 mixed child 的 cross-core pipe 从 slot2 改为 slot1 后，mature-8191 单进程日志
+`/tmp/csa_trb_group8_hadamard_quant_mixed_slot1_mature8191_abba_w20_s100.log`
+得到 native `720.700/726.302/730.5382 us`、PyPTO
+`789.010/803.290/832.163 us`。与 slot2 的跨进程方向性结果相比，PyPTO p50/p90
+分别改善约 `3.010/0.700 us`，p99 退化约 `7.052 us`；同时 B4/S8 的 qh pipe
+workspace 由约 2 MiB 降为约 1 MiB。由于 native 本身在两个进程间漂移
+`4.540 us`，这个微小 A/B 不能证明 p99 因果，但 slot1 在 p50/p90 和 workspace
+上都不差，当前源码保留 slot1，后续正式三进程测试会原样报告尾延迟。
+
+这组优化仍没有达到成熟上下文“超过 native”的最终目标：最新单进程 p50 仍落后
+约 `68.310 us`。它只是把成熟上下文差距从 valid-only 初始基线约 `157 us` 缩小到
+约 `68 us`。首次编译、warmup 或 capture 均不在这些 sample 中，因此不能靠扩大
+warmup 次数消除这部分差距；后续继续针对 score DAG 与 native overlap 差异优化。
+
+### 67.3 当前验证状态
+
+融合及 slot1 清理后执行：
+
+```text
+pytest -q tests/pypto_dsv4_decode_csa/test_jit_static_abi.py
+ruff check vllm_ascend/ops/dsa.py \
+  vllm_ascend/ops/_pypto_dsv4_csa tests/pypto_dsv4_decode_csa
+jq empty tests/pypto_dsv4_decode_csa/results/20260903_device0_trb_steady_state_performance.json
+```
+
+结果为 `15 passed, 14 warnings`，ruff 与 JSON 语法检查通过。warning 仍全部来自
+环境中的 `torch.jit.script_method` deprecation。此次只使用 device0；device1 未被
+调用。上述成熟上下文数据仍是方向性单进程证据，只有短上下文已有三 fresh-process
+正式 PASS。
+
+## 68. 成熟上下文 score 链继续收敛与稳态口径锁定
+
+本节继续只使用 A3 device0。所有可比较性能数字均来自 TRB + ACLGraph、B4/S8、
+`start_position=8191`、同 caller stream ABBA、20 次 benchmark warmup 后 100 个
+`SamplingPhase.SAMPLE` 样本；compile、PTOAS/codegen、binary/runtime/context 初始化、
+weight pack、ordinary warmup、capture、最终地址第一次 replay、结构 cache 建立和计时
+event 首次初始化均不进入统计。除特别说明外，结果都同时通过 output、六类 mutable
+state 以及 indexer INT8-K/FP16-scale 合同。
+
+### 68.1 没有保留的局部融合和生命周期提前实验
+
+尝试把 `idx_qr_proj_matmul` 与 dequant 合成 mixed child。slot2 日志
+`/tmp/csa_trb_qr_proj_dequant_mixed_slot2_mature8191_abba_w20_s100.log` 中 native 为
+`718.280/724.462/728.5496 us`，PyPTO 为 `804.460/829.642/837.2246 us`；slot1
+日志 `/tmp/csa_trb_qr_proj_dequant_mixed_slot1_mature8191_abba_w20_s100.log` 中
+native 为 `729.520/735.302/741.8714 us`，PyPTO 为
+`812.030/835.522/844.423 us`。两者均比拆分实现慢，说明消除一次 GM handoff 的收益
+不足以抵消更差的 mixed pipeline/资源占用，已完整撤销。
+
+尝试让 indexer KV writeback 更早 resolve 的日志为
+`/tmp/csa_trb_short_topk_score_store_kv_early_mature8191_abba_w20_s100.log`：native
+`716.440/722.520/731.351 us`，PyPTO `784.960/796.072/804.590 us`，相对当时
+基线退化，已撤销。该结果说明不能只凭“扩大 DAG overlap”推断收益；提前放行会改变
+共享 cache/核心竞争，必须用完整 replay 上板判定。
+
+### 68.2 score 显式双 AIV 与 reduction scratch 收敛
+
+对 score mixed child 使用 `pl.split_aiv(2, UP_DOWN)` 时，第一次 lower 因三张
+full-width lane-invariant tile 位于显式 region 内而被 verifier 拒绝。将 query scale、
+weights 和固定 reorder index 的 GM load 移到显式 region 外后，生成代码确认：AIC
+通过 TPUSH 发送 `[16,512]` shard，两条 AIV 以 `subblock_id * 16` 选择各自 scale 与
+输出片段；每 lane/page 只有一次 row-sum/gather/store。
+
+第一版一次归约 `[128,64]`。正确性日志为
+`/tmp/csa_trb_score_explicit_ud_group_rowsum_short_topk_mature8191_smoke2.log`；正式方向性
+日志 `/tmp/csa_trb_score_explicit_ud_group_rowsum_short_topk_mature8191_abba_w20_s100.log`
+得到 native `715.110/720.710/733.8084 us`、PyPTO
+`769.770/783.200/797.8106 us`。生成报告同时指出 32 KiB row-sum scratch 令
+`pipeline(stage=2)` 只能保留一个 vector buffer。
+
+因此把归约改为两个 `[64,64]` row-sum，共用一个 16 KiB scratch，再 concat 后执行
+同一个固定 gather。smoke 为
+`/tmp/csa_trb_score_explicit_ud_reduce64_short_topk_mature8191_smoke.log`；正式方向性日志
+`/tmp/csa_trb_score_explicit_ud_reduce64_short_topk_mature8191_abba_w20_s100.log` 得到
+native `718.810/726.384/730.6408 us`、PyPTO
+`767.590/778.814/798.0064 us`，p50 差距 `48.780 us`。生成报告不再出现 score
+page pipeline 只能使用 1/2 buffer 的 warning，当前源码保留这套 reduction。
+
+### 68.3 physical short top-k、store batching 与 score 小变体
+
+成熟 decode 的可见长度主要是 2048 或 2049。当前 top-k 不再总是物化/排序 4096
+项：`<=2048` 只处理前 2048 项；2049～2080 处理 2048 主段和固定 32 项 tail，并用
+不等长候选 merge；更长上下文仍进入原 4096 fallback。smoke 与正式日志分别为
+`/tmp/csa_trb_physical_short_topk_mature8191_replay8_smoke2.log` 和
+`/tmp/csa_trb_physical_short_topk_batched_store_mature8191_abba_w20_s100.log`。后者 native
+`717.740/724.184/767.001 us`，PyPTO `778.940/792.366/804.525 us`。physical
+short top-k 与 `>512` 路径移除冗余 `-1` 初始化均保留；同一实验中的 page-store
+batching 后续被单独证明退化，因此 batching 本身未保留。
+
+page-store batching 的独立日志
+`/tmp/csa_trb_score_batched_page_store_mature8191_abba_w20_s100.log` 得到 native
+`719.140/725.066/731.422 us`、PyPTO `788.030/803.866/815.412 us`，已撤销。
+
+score split/right 的若干中间结果如下，均只作方向性搜索：
+
+| 方案 | native p50/p90/p99 | PyPTO p50/p90/p99 | 状态 |
+| --- | ---: | ---: | --- |
+| split-UP_DOWN slot1 flat coeff | `712.910/718.426/721.3042` | `782.400/790.656/800.9488` | 被后续版本替代 |
+| split-UP_DOWN + query Right hoist | `726.180/732.352/737.6098` | `780.910/794.470/806.0204` | hoist 保留 |
+| no-split + Right hoist | — | `787.690/...` | 退化，撤销 |
+| explicit dual-AIV + reduce64 | `718.810/726.384/730.6408` | `767.590/778.814/798.0064` | 当前算术基线 |
+
+对应前两份日志为
+`/tmp/csa_trb_score_split_ud_slot1_flat_coeff_mature8191_abba_w20_s100.log` 和
+`/tmp/csa_trb_score_split_ud_slot1_right_hoist_mature8191_abba_w20_s100.log`。
+
+### 68.4 profiler fail-closed
+
+对 reduce64 版本额外执行诊断 profile，日志为
+`/tmp/csa_trb_score_explicit_ud_reduce64_short_topk_profile.log`，raw 根目录位于
+`/tmp/csa_profile_reduce64/`。本轮 profiler 产物不完整：`trace_view.json` 恰好在
+270176 bytes 截断，缺少 `kernel_details.csv`，CANN timeline parser 全部失败，raw
+trace 只含 CPU/Python category、没有可核对的 device event。因此这份 profile 不能
+支持任何 kernel 排序或 overlap 结论，严格按 fail-closed 处理。它也意味着 66.2 的
+历史 overlap 推断不能被本轮产物继续强化；最新 gate-on/off 因果测试和 score 上板
+A/B 才是当前更直接的瓶颈证据。
+
+### 68.5 native-like 第二次 Cube 是负优化
+
+实现过一版 native-like score 原型：先构造 FP16 block-diagonal
+`qh_scale * weights` coefficient；page 内执行 INT8 QK Cube、FP16 ReLU AIV、AIC
+gather、FP16 第二次 Cube，再由 AIV 乘 K scale、reorder、store。编译过程中先修正
+`b_trans=True` 的 tile 约束，改为 `transpose_view`；又修正 PTOAS 不支持的子 view，
+改成完整 `[16,16]` flatten 后按 `cache * 16 + token` gather。最终 correctness smoke
+`/tmp/csa_trb_score_second_cube_fp16_mature8191_smoke3.log` 通过；正式方向性日志
+`/tmp/csa_trb_score_second_cube_fp16_mature8191_abba_w20_s100.log` 得到 native
+`711.670/718.490/723.0974 us`、PyPTO `816.680/827.744/838.2488 us`，比 reduce64
+基线约慢 `49 us`，已完整撤销。生成结构显示其每 page 重新加载 64 KiB query，并增加
+一次 AIC→AIV→AIC→AIV round trip，导致 page pipeline 降级；所以不能把“以第二个
+matmul 替代 vector reduction”孤立看成收益。
+
+### 68.6 删除固定索引表 child：失败尝试、最终实现与结果
+
+原 index score 路径有一个单 block 的 `qr_rope_swap_idx` child，每次 replay 生成两张
+固定表：`[32,64]` 的 RoPE `j^1` 索引和 `[1,128]` 的 score reorder 索引。第一版
+尝试把两张表直接并入 `csa_rope_step` metadata task，公开 ABI 仍为 44。PTOAS 能编译，
+但 device0 首次执行在 AICPU orchestrator 触发：
+
+```text
+Assertion failed: valid_reshape(new_shapes, new_ndims)
+Location: src/common/task_interface/tensor.h:380
+retCode=0x2a
+```
+
+失败日志为 `/tmp/csa_trb_static_tables_in_metadata_mature8191_smoke.log`。生成
+`orchestration/decode_csa_core.cpp` 明确出现错误 SSA 绑定：本应 reshape
+`rope_cos_t` 的代码使用了单元素 `need_index_score`，后一项又错位使用 `rope_cos_t`。
+因此该方案不是数值问题，而是给这个 task 新增多个 inout 后触发的 orchestration
+输出映射问题，已撤销，不能依赖“恰好编译成功”。
+
+最终实现不增加公开输入：
+
+1. 将 `qkv_proj_rope` 已经生成、并供 Q/KV RoPE 使用的 `[tokens,64] j^1` tensor 提升到
+   public callable 内部，由 qkv 与 indexer 两个 inline consumer 共享；indexer 只在
+   自己的 use site 取 `[32,64]` 视图；
+2. `[1,128]` reorder 表仍在 indexer 内部申请，但生成算术合并到本来就必须执行的
+   score-gated `weights_proj_reduce` child；
+3. 删除独立 `qr_rope_swap_idx` child，gate predicate child 数从 8 降为 7；
+4. 公开 L1 ABI、Torch weights、allocator/lease 和 capture binding 均保持 44-slot。
+
+device0 非零成熟 correctness 日志为
+`/tmp/csa_trb_reuse_qrope_reorder_in_weights_mature8191_smoke2.log`。output close；
+compressed KV、SWA KV、两类 compressor state 全部 close；indexer K raw bit-exact，
+scale bit-exact。相同 ACLGraph 稳态口径日志为
+`/tmp/csa_trb_reuse_qrope_reorder_in_weights_mature8191_aclgraph_abba_w20_s100_tq1.log`：
+native `713.760/719.972/727.0016 us`，PyPTO `762.510/783.286/792.7958 us`；p50
+差距 `48.750 us`，与 reduce64 前一基线的 `48.780 us` 基本相同。也就是说该改造减少
+一个 replay task、一个固定表的重复生成和约 8 KiB 内部 scratch，但单进程噪声内尚
+不能证明 wall-time 收益；由于结构更简单、ABI 不变且无回退，当前暂时保留，仍需
+静态依赖测试和后续重复进程复核。
+
+### 68.7 benchmark mode 与 taskQueue 环境的反例
+
+本轮曾误以 eager 运行与历史 ACLGraph 数字横比，生成两份不可比较日志：
+
+- `/tmp/csa_trb_reuse_qrope_reorder_in_weights_mature8191_abba_w20_s100.log`
+- `/tmp/csa_trb_reuse_qrope_reorder_in_weights_mature8191_abba_w20_s100_tq1.log`
+
+其 Host callback 达到毫秒级，device event 呈 ABBA 位置相关双峰；根因不是 cold
+compile 进入样本，而是 `--mode eager` 与历史 `--mode aclgraph` 不同。另一次用
+`TASK_QUEUE_ENABLE=2` capture 的日志
+`/tmp/csa_trb_reuse_qrope_reorder_in_weights_mature8191_aclgraph_abba_w20_s100.log` 在
+capture_begin 前明确失败：torch_npu 2.12 不支持 mode 2 graph capture。当前环境契约
+因此锁定：普通 eager/OpAPI V2 性能验证使用 `TASK_QUEUE_ENABLE=2`；ACLGraph
+capture/replay 使用 `TASK_QUEUE_ENABLE=1`（或另行验证 0），两种模式不得混写结果。
+后续 runner 应在导入 torch_npu 前 fail-fast 并把实际值写入 metadata，防止再生成
+“字段声称覆盖 taskQueue、环境却不匹配”的伪正式结果。
+
+### 68.8 用户确认的最终性能验收边界
+
+本轮目标不是比较端到端首次可用延迟，而是比较部署完成后的常态执行性能。明确排除：
+
+- PyPTO 第一次 program compile、PTOAS/codegen；
+- binary 注册/materialization、runtime/context/owner 创建与 prepare；
+- weight pack；
+- ordinary eager、ACLGraph 以及 benchmark 的全部 warmup；
+- ACLGraph capture；
+- 最终采样 tensor 地址上的第一次 ordinary invocation/replay；
+- 一次性的结构 cache、event handle 和 callable materialization；
+- correctness golden 的构造、执行与 Host comparison。
+
+进入 `SamplingPhase.SAMPLE` 后，每次正常调用真实发生的 tensor/scalar/address patch、
+taskQueue enqueue/dequeue、AICPU/AICore scheduler 和 kernel 执行全部计入；不能把重复
+地址变化导致的常态 cache miss 伪装成 warmup 排除。固定地址 ACLGraph replay 本来就
+没有 per-replay patch，禁止人为注入虚假 patch。最终目标仍是同 workload、同精度
+门禁、native production overlap 开启、同卡同 caller stream ABBA、至少三个 fresh
+process、每进程至少 20 次 warmup 后 100 个 sample，并以 paired difference
+`D = native - PyPTO` 判定 `D50 > 0, D90 >= 0, D99 >= 0`。首次编译和所有 warmup
+不参与这个“超过 native”的结论。
+
+## 69. 稳态目标固化、benchmark 模式门禁与固定表跨桶契约
+
+### 69.1 goal 的性能范围再次收窄并固化
+
+用户再次明确：性能目标不包含 PyPTO 第一次算子编译以及其他任何 warmup，要求的是
+部署和预热完成后的常态化性能超过 native。本轮没有改动第 68.8 节已经列清的计入项，
+而是把它作为后续所有性能实验的强制验收定义：首次 compile/PTOAS、binary/context
+materialize、prepare、weight pack、普通与 ACLGraph warmup、capture、最终采样地址的
+首轮调用/replay、一次性 structure-cache/event 初始化以及 correctness golden 全部在
+`SamplingPhase.SAMPLE` 前完成并由 caller quiesce，不进入胜负样本。正式样本仍保留每次
+真实发生的地址/scalar patch、taskQueue enqueue/dequeue、device scheduler 和 kernel
+execution；持续地址 churn 产生的常态 cache miss 不能被重新命名为 warmup。
+
+### 69.2 taskQueue 环境在 torch_npu import 前 fail-fast
+
+第 68.7 节记录了错把 eager 与 ACLGraph 横比、以及
+`TASK_QUEUE_ENABLE=2` 被 torch_npu 2.12 ACLGraph capture 拒绝的反例。本轮将该经验
+落实到 `a3_single_op_benchmark.py`：runner 在占用 `_PROCESS_RUNTIME`、导入
+`torch/torch_npu` 或访问 device0 之前，强制核对：
+
+- 普通 eager/OpAPI V2：`TASK_QUEUE_ENABLE=2`；
+- ACLGraph capture/replay：`TASK_QUEUE_ENABLE=1`。
+
+缺失或错值均要求重新启动 fresh process，不在 Python 内自动篡改环境。measurement
+metadata 新增实际 `task_queue_enable`、分模式 `task_queue_contract` 和
+`task_queue_validated_before_torch_npu_import=true`；ACLGraph 的 steady callback 明确记为
+`graph.replay()`，不再错误声称每轮 replay 都重新执行 `RunOpApiV2`。README 同步加入两条
+带环境变量前缀的正式命令。Host 回归覆盖环境缺失、错值、正确值、校验早于 import 的
+源码顺序，以及 eager/ACLGraph 两种 metadata 语义。
+
+### 69.3 `[tokens,64]` 固定表复用的跨桶 specializer 边界
+
+对第 68.6 节的共享 RoPE `j^1` 表做进一步只读审计后发现：B4 的 `tokens=32`，恰好与
+indexer 的 `ROPE_ROW_TILE=32` 相等；原先 indexer 参数固定注解 `[32,64]`，而 caller
+实际为所有 bucket 申请 `[tokens,64]`。B4 上板成功不能证明 B8/B12/B16 的形状契约。
+
+第一版修正尝试在 caller 向 indexer 传
+`rope_swap_idx_t[0:32, 0:ROPE_HEAD_DIM]`，保持 indexer 固定注解。Host 静态测试通过，但
+真实 annotation-only B4 compile 立即 fail-closed：
+
+```text
+ValueError: @pl.jit: missing inferred tensor metadata for parameter 'rope_swap_idx_t'.
+This usually means the tensor's shape/dtype could not be statically determined.
+```
+
+这说明当前 PyPTO specializer 不能为转发给 inline 参数的 Tensor slice 稳定推导 metadata；
+该版本未进入设备执行并已撤销。最终方案不增加 ABI：caller 继续把同一个完整
+`[tokens,64]` owner 传给 qkv 和 indexer，indexer 的内部参数改为泛型 `pl.Tensor`，并只在
+`qr_rope` use site 明确取 `[0:ROPE_ROW_TILE, 0:ROPE_HEAD_DIM]`。这样 TensorMap 仍看到同一
+producer storage，B4/B8/B12/B16 又不依赖 accidental equality。
+
+四个 TRB specialization 随后在 device0 配置下完成真实 compile：
+
+- B4：`build_output/_jit_decode_csa_core_20260903_065525_653088`；
+- B8：`build_output/_jit_decode_csa_core_20260903_065530_009410`；
+- B12：`build_output/_jit_decode_csa_core_20260903_065535_206777`；
+- B16：`build_output/_jit_decode_csa_core_20260903_065541_569426`。
+
+四者均为 118 条 perf hint / 112 个 site。新增 Host 测试同时锁住：44-slot public ABI、四桶
+caller owner 形状、泛型 inline 参数、use-site 固定 32 行 view、qkv/indexer 同 storage、
+独立 `qr_rope_swap_idx` child 不得回归、reorder 表由同 predicate 的
+`weights_proj_reduce` 写入、score 显式等待该 producer，以及 128 项 cache-major 到
+token-major permutation 公式。连同 benchmark mode 测试，定向结果为
+`50 passed, 14 warnings`。
+
+最终又在 device0、TRB、普通 OpAPI V2（`TASK_QUEUE_ENABLE=2`）、B4/S8、
+`start_position=8191` 做非零 mature correctness smoke，日志为
+`/tmp/csa_trb_generic_rope_swap_b4_mature8191_smoke.log`。output close，六类 mutable state
+全部 close，indexer K raw bit-exact、scale bit-exact，证明泛型 inline 参数方案没有改变
+当前 B4 数值行为。这一 smoke 的单次 eager 时间不属于正式性能样本，不用于“超过
+native”的结论。
+
+### 69.4 暂不实施 full-resident score+top-k 的原因
+
+对“把 score 与 top-k 收进一个全驻留 child”做了源码级可行性审查。当前成熟日志差距为
+`48.750 us`，而历史同 workload 暂时绕过 top-k 仅改善约 `6 us`；融合能消除的主要是
+一个 task 边界和约 262 KiB score GM write/read，保守上限约 0～8 us。它还必须以
+`available_cluster_count()`、`sync_start=True` 和 AIV hard barrier 保证所有 score shard
+对 top-k 可见。B4 当前 `score_units=20`，恰等 device0 runtime 的 20 个 group；全核同时
+入场并驻留到 top-k 完成，可能破坏现有 score 与其它 ready child 的渐进 overlap。
+
+更关键的是，成熟上下文每个 token 的 2048 个 score 分布在 5 个 page split × 2 个 AIV
+lane；每个 shard 只有约 192/208 项，小于最终 K=512，不能在 shard 内安全裁剪。维持当前
+ownership 时，精确 top-k 无法同时避免全局 barrier 和 GM handoff。鉴于理论收益远小于
+当前差距且退化风险明确，本轮不把该方案直接并入主线；如以后实验，必须先通过四桶
+compile/UB 高水位与边界 correctness，并以三 fresh-process p50 中位改善至少 5 us、p90
+不退化作为保留门槛。当前主线继续寻找 score 前驱资源竞争以及与其余 CSA DAG overlap
+的结构差异。
+
+### 69.5 两个 score 局部优化均被稳态数据否决
+
+先尝试将 score 每个 page 内重复执行的 `qh_scale × head_weight` 提前到
+`weights_proj_reduce`，生成 per-token/head coefficient，使 page AIV 从两次 FP32
+`col_expand_mul` 降为一次。该版本不改 44-slot ABI，但因 coefficient 同时依赖
+`_weights_tid` 与 `_qh_quant_tid`，把原本可并行的两条前驱在 reduce 处提前 join；同时为
+满足静态 tile 要求必须使用 padded coefficient backing。B4 compile artifact 为
+`build_output/_jit_decode_csa_core_20260903_070026_846203`，非零 correctness 日志
+`/tmp/csa_trb_score_coeff_precompute_mature8191_smoke.log` 全部通过。
+
+三次 fresh-process、ACLGraph、20 warmup/100 sample 的方向性 A/B 为：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 |
+| --- | ---: | ---: |
+| 1 | `725.900/731.924/738.2404 us` | `763.180/777.260/793.6772 us` |
+| 2 | `714.170/721.982/730.2134 us` | `765.610/778.592/788.209 us` |
+| 3 | `709.440/716.988/723.3272 us` | `765.120/778.568/800.6458 us` |
+
+日志依次为
+`/tmp/csa_trb_score_coeff_precompute_mature8191_aclgraph_abba_w20_s100.log`、
+`..._run2.log`、`..._run3.log`。旧版最近 PyPTO p50 为 `762.510 us`；新版本三轮中位
+`765.120 us`，没有收益，且存在明确的 DAG join 代价，因此已完整撤销。不能因为 run 1
+的 native 自身变慢而把相对 gap 缩小误认成 PyPTO 优化。
+
+第二项只改 mixed score 的软件 pipeline/C2V credit：`stage=2 + slot=1` 改为
+`stage=1 + slot=2`。artifact
+`build_output/_jit_decode_csa_core_20260903_070433_048727` 确认 C2V reserved buffer 为
+131072B、slot size 65536B × 2；Vec 最高 allocation 起点 185408B、最后 tile 到约
+185920B，未越 A2/A3 的 188416B 上限。非零 smoke
+`/tmp/csa_trb_score_stage1_slot2_mature8191_smoke.log` 全部通过。但两轮正式方向性结果：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 |
+| --- | ---: | ---: |
+| 1 | `722.060/728.514/735.5514 us` | `772.850/786.084/795.1888 us` |
+| 2 | `712.070/717.636/722.7266 us` | `774.110/787.184/794.6036 us` |
+
+对应日志为
+`/tmp/csa_trb_score_stage1_slot2_mature8191_aclgraph_abba_w20_s100_run1.log` 和
+`..._run2.log`。两轮都比当前基线退化约 10 us，说明 loss of software prefetch 大于第二
+C2V slot 的收益；无需消耗第三轮即可按预设 kill 条件撤销。两项实验的首次 compile、
+correctness smoke、capture 和 warmup 均未计入上述 steady sample。
+
+### 69.6 QK GEMM 方向翻转同样撤销
+
+第三项低风险搜索保持 INT8×INT8→INT32 数学与公开 ABI 不变：将原
+`K[32,128] × Q^T[128,512]` 攻击方向翻转为 native-like 的
+`Q[512,128] × K^T[128,32]`，再把 `[512,32]` Acc 以 `transpose_view` 作为
+`[32,512]` 交给现有双 AIV。artifact
+`build_output/_jit_decode_csa_core_20260903_070752_321530` 的生成代码确认：Acc
+transpose 没有新增 `TMOV/TTRANS`，直接以不同 SLayout 的 view `TPUSH`；query 只在 task
+开头移入 Left，paged K 每页移入 Right。非零 smoke
+`/tmp/csa_trb_score_query_left_k_right_mature8191_smoke.log` 的 output、六类 state、
+indexer raw K/scale 全部通过。
+
+两轮 steady ACLGraph 方向性结果仍为负：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 |
+| --- | ---: | ---: |
+| 1 | `708.300/717.262/721.3256 us` | `767.530/776.676/786.4182 us` |
+| 2 | `718.050/725.020/731.4656 us` | `779.100/790.198/801.408 us` |
+
+日志为
+`/tmp/csa_trb_score_query_left_k_right_mature8191_aclgraph_abba_w20_s100_run1.log` 与
+`..._run2.log`。虽然布局转换是零拷贝，A3 上现有 K-left、Q-right 的 32×512 physical
+matmul 仍明显更快；该版本已撤销。至此，precomputed coefficient、双 C2V slot 和 GEMM
+方向翻转三个局部候选都没有超过当前基线，主线恢复为
+`stage=2 + slot=1 + K-left/Q-right`。后续不得将这些已撤销 artifact 的数字混入正式
+结果，也不应在缺少新 profiler 证据时重复同类微调。
+
+### 69.7 有效 profiler 导出与成熟上下文差距的闭合分解
+
+第 68.4 节两次 profiler export 都因 `trace_view.json` 截断而 fail closed。本轮第一次
+重试 `/tmp/csa_trb_current_mature8191_aclgraph_profile_round1.log` 仍没有产出完整表；
+直接运行导出器后定位到解析子进程加载 `libsqlite3.so` 失败。该库实际位于
+`/usr/local/sqlite3/lib`，因此只对诊断进程在既有 toolchain 路径前追加这一目录，并
+使用当前已恢复的正式 score 实现重新启动 fresh device0 process。有效日志为：
+
+`/tmp/csa_trb_current_mature8191_aclgraph_profile_sqlite_round1.log`
+
+有效 profiler 根目录为：
+
+`/tmp/csa_profile_current_sqlite_20260903/decode_csa_tensormap_and_ringbuffer_aclgraph_3289559_1788390800801559439/6c42b4b8ccc347b39c28d0410ff20ed7_3289559_20260903071320804_ascend_pt/ASCEND_PROFILER_OUTPUT/`
+
+其中 `kernel_details.csv` 为 28,740 bytes，`trace_view.json` 为 186,843 bytes，均可完整
+解析。该进程先完成正式 20 warmup/100 sample ABBA，再额外执行一次不进入正式 percentile
+的两轮诊断 profile；profile 前后 output、六类 mutable state、indexer raw K/scale 门禁
+全部通过。正式样本的 device p50/p90/p99 为 native
+`704.220/711.950/722.980 us`、PyPTO `769.010/780.876/790.904 us`，Host replay p50
+分别为 `18.721/18.856 us`。因此约 `64.790 us` 的 p50 差距不在 Python enqueue 或
+taskQueue producer 侧。
+
+用 `Decimal` 而不是 binary float 读取巨大绝对时间戳，并以四个 `MODEL_EXECUTE`/
+`MODEL_WAIT_COMPLETE` 窗口切分 `kernel_details.csv`，两次 native 与两次 PyPTO 结果为：
+
+| 指标（us） | native #1 | native #2 |
+| --- | ---: | ---: |
+| stream 12 kernel sum | `678.740` | `657.700` |
+| stream 11 kernel sum | `153.240` | `153.860` |
+| 两流 kernel sum | `831.980` | `811.560` |
+| stream 11/12 overlap | `115.780` | `118.740` |
+| interval union | `716.200` | `692.820` |
+| compute span | `736.060` | `713.300` |
+| span 内 global idle | `19.860` | `20.480` |
+| 完整 MODEL envelope | `742.220` | `719.280` |
+
+这里可逐项复核 `compute span = kernel sum - overlap + idle`。native 最大的单段 overlap
+是辅助流 `ScatterNdUpdateV2` 与主流 32768-wide `QuantBatchMatmulV3`，两轮分别隐藏
+`52.300/53.560 us`；全部前段 Q/QKV 分支合计隐藏 `87.940/91.040 us`，中段
+compressor/indexer 为 `17.720/17.500 us`，后段量化/投影为 `10.120/10.200 us`。
+
+| 指标（us） | PyPTO #1 | PyPTO #2 |
+| --- | ---: | ---: |
+| AICPU scheduler | `808.580` | `770.840` |
+| `aicore_kernel_0` | `790.960` | `757.760` |
+| AICPU 比 AICore 提前 | `1.900` | `1.880` |
+| AICore 结束后的 AICPU tail | `15.720` | `11.200` |
+| AICPU envelope 相对 AICore 增量 | `17.620` | `13.080` |
+| 完整 MODEL envelope | `818.300` | `780.460` |
+
+第二轮更接近稳态，其完整 MODEL 差距严格闭合为：
+
+```text
+PyPTO MODEL - native MODEL
+= (757.760 - 713.300) + 13.080 + 3.640
+= 44.460 + 13.080 + 3.640
+= 61.180 us
+```
+
+其中 AICore 层 `44.460 us` 又可写为：
+
+```text
+(PyPTO AICore - native serial kernel sum) + native overlap - native idle
+= (757.760 - 811.560) + 118.740 - 20.480
+= -53.800 + 118.740 - 20.480
+= 44.460 us
+```
+
+这给出比“task 数多”更精确的结论：PyPTO 当前融合和 task 消除已经让 AICore 总区间比
+native 两流串行和少 `53.800 us`，但仍不足以抵消 native 的 `118.740 us` 双流 overlap。
+再加约 `13.080 us` AICPU completion envelope 和 `3.640 us` 图外围净差，得到与正式
+p50 `64.790 us` 接近的诊断差值。每次 PyPTO replay 前确有两个 `MEMCPY_ASYNC`，duration
+为 `2.740/2.800 us`，整体 wall span 约 `5.6 us`；但 trace 未记录方向和 byte count，且
+ACL-to-NPU flow parser 有告警，所以“它们是 LaunchKernelWithHostArgs 的 H2D tiling”只记为
+高概率推断，不能写成已证事实。调用间 `MODEL_WAIT_COMPLETE -> MODEL_EXECUTE` 仅 `0.020 us`，
+没有隐藏的几十微秒 dequeue 空洞。
+
+当前 CANN profiler 只能看见整个 `aicore_kernel_0`，不能展开其内部 38 个 PyPTO top-level
+submit 的 child 时间线。因此已验证的首要优化方向是恢复依赖无关分支的设备并行，理论上只需
+取回 native overlap 的约一半就能覆盖 AICore 差距；第二优先级才是最多约 `13 us` 的 AICPU
+completion tail，两个 DMA/图外围排在其后。具体某个 child 的 5～10 us 微调仍必须通过 A/B，
+不能从这份 monolithic trace 伪造逐 child 归因。
+
+### 69.8 score-child 内部 coefficient hoist 仍是负优化
+
+在不改变依赖 DAG 的前提下又验证了一种与第 69.5 节不同的 coefficient hoist：不在上游
+`weights_proj_reduce` 物化新 GM tensor，而是在 score child 载入 `qh_scale_group` 和
+`weights_group` 后，尝试在 cache-page 循环外计算一次二者乘积。第一版把 `tile.mul` 直接放在
+显式 `split_aiv` 外，`OutlineIncoreScopes` 的 `AivSplitValid` verifier 明确拒绝；完整失败日志为
+`/tmp/csa_trb_score_coeff_local_mature8191_aclgraph_abba_w20_s100_run1.log`，设备计算尚未启动。
+
+按照 verifier 契约，第二版用独立 `SplitMode.NONE` region 在两个 AIV lane 上各生成一份
+coefficient；artifact 为 `build_output/_jit_decode_csa_core_20260903_072415_826166`（后续 fresh
+process 另生成同构 artifact）。两轮均通过 compile、ACLGraph 和采样前后完整数值门禁，但稳态
+结果为：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 |
+| --- | ---: | ---: |
+| 1 | `732.220/738.670/741.955 us` | `773.820/786.172/796.500 us` |
+| 2 | `714.290/722.502/726.741 us` | `771.850/784.054/793.932 us` |
+
+对应日志为
+`/tmp/csa_trb_score_coeff_local_split_mature8191_aclgraph_abba_w20_s100_run1.log` 与
+`..._run2.log`。候选两轮 PyPTO p50 中位约 `772.835 us`，高于当前正式实现最近的
+`762.510/769.010 us`；run1 paired gap 看似缩小只是 native 当轮变慢，不能作为收益。额外
+replicated AIV region 的固定成本没有被每页少一次 multiply 抵消，因此该实现已完整撤销，主线
+继续保持每页先乘正 dequant scale、ReLU、再乘 head weight 的原始次序。
+
+### 69.9 L1 child 级 DFX 能力审计
+
+有效 CANN trace 只能看到外层 `simpler_aicpu_l1_exec` 和单个
+`aicore_kernel_0`，因此进一步只读审计了当前 PyPTO/simpler 的 child 级诊断能力。结论是：
+不修改这两个参考仓时，A2/A3 的直接 L1 路径不能通过已有开关获得 child task 的真实
+start/end 时间线。`DeviceRunnerBase::initialize_l1_borrowed` 会在
+`runtime/src/common/platform/onboard/host/device_runner_base.cpp` 中拒绝
+chip-swimlane、PMU、dump-args、dep-gen 和 scope-stats；A2/A3 的
+`prepare_l1_platform_state` 又在
+`runtime/src/a2a3/platform/onboard/host/device_runner.cpp` 中把
+`enable_profiling_flag` 强制设为 `SIMPLER_DFX_FLAG_NONE`。L1 也不分配 L2 DFX 使用的
+device-wall buffer。因此这不是缺少一个环境变量，而是当前 borrowed-device ABI 的明确
+能力边界。
+
+在本轮“PyPTO/simpler 只读”的范围内，后续采用两层证据：正式稳态延迟仍只认同输入的
+L1 ACLGraph trace；热点定位可让同一份 TRB callable、同一组合法 tensor/scalar/page
+metadata 在独立 fresh process 中走一次 L2 chip-swimlane/PMU。L2 数据只能用于 child
+排序、关键路径和调度空洞诊断，不能把其打开 DFX 后的绝对耗时写成生产 L1 性能。AICPU
+DEBUG slog 最多能验证 dispatch 顺序，没有 completion timestamp，而且会严重扰动 scheduler，
+同样不进入正式 benchmark。
+
+### 69.10 `idx_qr_proj` 的 M32/N512 重排被撤销
+
+基于静态计算量审计，尝试把 indexer query projection 从每 task 的
+`M16 × (N512 + N512)` 改为 `M32 × N512`。B4 下两者均为 16 个 AIC task，INT8 MAC、
+K=1024 的累加次序和公开 ABI 不变；候选理论上把 8-MiB `idx_wq_b` 从两个 M-row block
+各扫描一次改为一次。为隔离变量，`weights_proj` 仍保持原 M16 切分，没有随公共常量一起
+变为 M32。Host lint 与 74 个定向静态/契约测试全部通过，candidate artifacts 为：
+
+- `build_output/_jit_decode_csa_core_20260903_073406_545641`；
+- `build_output/_jit_decode_csa_core_20260903_073510_239681`。
+
+第一次 fresh-process 在采样前 correctness gate fail-closed：主输出、五类非量化状态和
+1024 个 indexer K 元素均通过且 raw K bit-exact，但 8 个新写 scale 中有 1 个不一致，
+最大绝对差 `0.0015716552734375`；因此该进程没有形成任何性能样本。第二次 fresh-process
+的采样前后完整门禁均通过，20 warmup/100 sample 的稳态结果为 native
+`712.670/719.416/721.723 us`、PyPTO `775.800/787.384/798.095 us`。日志分别为：
+
+- `/tmp/csa_trb_idx_qr_m32n512_mature8191_aclgraph_abba_w20_s100_run1.log`；
+- `/tmp/csa_trb_idx_qr_m32n512_mature8191_aclgraph_abba_w20_s100_run2.log`。
+
+候选 PyPTO p50 比当前正式实现最近的 `762.510/769.010 us` 更慢约 6～13 us。编译期
+`perf_hints.log` 同时指出 M32/N512 的每个 Right stage 为 32768B，在 65536B Right
+容量中只能容纳 pipeline depth 2 所需两份 buffer，且 co-resident/pipeline group 使实际
+复用串行化；节省一次 GM 权重扫描没有转化为执行收益。结合首轮 scale 抖动和第二轮稳态
+退化，该实现已完整撤销，后续不能只按总 GM byte 估算同类放大 M tile 的收益。
+
+### 69.11 用同一 TRB callable 的 L2 chip-swimlane 补齐 child 关键路径证据
+
+第 69.9 节确认 L1 borrowed-device ABI 无法直接输出 child start/end 后，本轮没有修改
+PyPTO 或 Simpler，而是在独立 fresh process 中把**同一份当前 TRB callable、同一组
+B4/S8/C8191 tensor/scalar/page metadata**送入 L2 chip-swimlane。该结果只用于排序和找
+流水空洞，不作为 L1 绝对性能，也不与 native 的 L1 数字直接做加减。baseline artifact 为
+`build_output/_jit_decode_csa_core_20260903_071312_038476/dfx_outputs/`，完整日志为
+`/tmp/csa_trb_current_mature8191_l2_swimlane.log`。
+
+DFX 解析到 900 个 block、59 个实际 top-level task 和 92 条依赖边，device makespan 为
+`731.44 us`；按 child duration 和依赖计算的静态 critical-path 为 `560.8 us`，scheduler
+归因约为 `604.5 us` compute、`126.9 us` stall。关键尾段的时间窗为：
+
+- `qk_pv`：约 `344–477 us`；
+- monolithic `merge_norm`：约 `479–519 us`；
+- 各 group `proj_a_mm`：约 `523–669 us`；
+- `proj_b_mm`：约 `615–723 us`；
+- `proj_b_act`：约 `724–731 us`。
+
+因此这份证据把后段关键链精确到 `merge -> proj_a -> cast -> proj_b -> act`，并说明
+`merge_norm` 的全量 completion barrier 会阻止先完成的 head/group 提前进入投影。它支持
+把 merge 按 head tile 拆成细粒度可兑现依赖，而不支持凭 L2 的 `731.44 us` 宣称 L1 会得到
+同样绝对时延。
+
+### 69.12 merge→projection 细粒度流水：成立，但收益小于理论上限
+
+把原来的单个 128-block `merge_norm` 拆为四个并列 task；每个 task 负责一个
+`H_TILE=16` head tile，即两个 output group，并只返回四个 scalar `TaskId`。为了符合
+PyPTO inline verifier，局部 `pl.Array[TaskId]` 没有跨函数边界，public/inlined return ABI
+仍只有 tensor 与四个 scalar。`local_o_proj` 为每组 `proj_a_mm` 选择
+`heads_deps[g // 2]`，使先完成的 merge tile 可以独立启动对应两个 group 的投影。
+Host static ABI 测试同时覆盖了：返回/参数中不逃逸 `pl.Array`、四个 scalar 的顺序、
+16-head tile 到 8-group 的一一映射和精确 dependency 文本。
+
+首轮实现漏写了 `merge_norm` 对 `rope_cs` materialization 的显式依赖。DFX 中 rope 恰好更早
+完成，所以三轮真机没有表现成错误，但这仍属于 DAG 契约缺陷；发现后立即改为每个 merge
+task 同时依赖 `_qk_tid` 和 `rope_cs_tid`，并在 device0 上重新 compile/capture/完整前后
+正确性门禁。修复后的 artifact 为
+`build_output/_jit_decode_csa_core_20260903_080239_225824`，日志为
+`/tmp/csa_trb_merge_pipeline_rope_dep_mature8191_aclgraph_abba_w20_s100_run1.log`，其稳态
+native 为 `717.360/725.950/728.215 us`，PyPTO 为
+`765.730/779.084/797.541 us`。
+
+漏依赖版本此前三个 fresh process 的 PyPTO p50/p90/p99 分别为：
+
+- `755.040/768.248/783.764 us`；
+- `766.090/776.930/795.052 us`；
+- `760.260/773.304/779.836 us`。
+
+修复不改变实际执行顺序，四轮均通过数值门禁；PyPTO p50 的波动区间仍落在原基线附近，
+说明该变更至多是数微秒级收益，不足以单独覆盖约 50–65 us 的 native 差距。对应 L2 DFX
+artifact 为 `build_output/_jit_decode_csa_core_20260903_074547_379044/dfx_outputs`：
+实际 top-level task 从 59 增至 62，边数为 93，compute/stall 约为
+`617.8/118.9 us`，L2 makespan 反而从 `731.44` 升至 `736.9 us`；但从 qk 完成对齐看，
+第一个 proj-a 提前 `12.34 us`，最后 proj-b 提前 `5.34 us`，最终 act 提前
+`6.10 us`，且 merge 与 proj-a 有 `15.92 us` 的真实 overlap。结论是依赖流水确实兑现，
+但增加的 task/completion 固定成本抵消了多数收益，因此保留它主要是为了更正确、更细的 DAG，
+不能把理论 overlap 全部记作性能收益。
+
+在此基础上还试过把每两个 8-block `proj_b_mm` 合成一个 16-block task，以减少 completion
+和 final fan-in。两个 fresh process 的 PyPTO p50/p90/p99 分别为
+`760.480/778.200/794.917 us` 和 `762.630/775.834/783.275 us`；相对独立 merge 候选
+没有稳定收益，已完整撤销，当前仍保持每 group 一个 `proj_b_mm` TaskId。
+
+### 69.13 QK M64 批量复用在稳态口径下仍为负优化
+
+为让一次 gather 的 KV tile 服务四个而不是两个 head tile，尝试把 `QK_M_TILE` 从 32
+放大到 64。默认 ring slot 编译直接被容量检查拒绝：Vec 使用
+`197120 B > 188416 B`，日志为
+`/tmp/csa_trb_qk_m64_merge_pipeline_mature8191_aclgraph_abba_w20_s100_run1.log`。
+显式把 qk child 设为 `cross_core_slot(slot_num=1)` 后可编译，且 compile、ACLGraph、采样
+前后完整正确性全部通过；artifact 为
+`build_output/_jit_decode_csa_core_20260903_075933_954118`，日志为
+`/tmp/csa_trb_qk_m64_slot1_merge_pipeline_mature8191_aclgraph_abba_w20_s100_run1.log`。
+其稳态 native 为 `708.770/715.028/718.764 us`，PyPTO 为
+`766.990/778.878/795.034 us`，比同阶段 M32 merge 候选的 p50 中位数更慢。
+
+历史上独立的 cost-balanced M64 实验也给出一致先验：默认 4-slot 同样因 Vec 容量失败；
+降到 slot2 后 M64 PyPTO `854.810 us`，同阶段 M32 为 `852.770 us`。这些数字均是完成
+compile/init/prepare/capture/首次 binding 和 20 次 warmup 后的 100-sample ACLGraph
+`device_span`，所以失败结论与本轮新增的“只看稳态”目标没有冲突。M64 降 slot 后丢失
+pipeline 并发、tile 本身又顶到 L0/Vec 容量墙，KV 重用没有变成端到端收益。该候选现已撤销，
+恢复 `QK_M_TILE=32`、stage-2 pipeline 和默认 slot。
+
+## 70. 性能 goal 改为只验收常态化稳态
+
+用户进一步明确：最终“超过 native”的性能目标**不包括** PyPTO 第一次算子编译以及任何
+warmup 阶段。goal tracker 的顶层 objective 仍是实现本开发计划，但验收语义以本节和开发
+计划第 3.3 节为准；runner 也已把该契约写入每份结果的机器可读
+`metadata.measurement_contract`，避免后续口头改变统计边界。
+
+进入 `SamplingPhase.SAMPLE` 前必须全部完成且外部 quiesce 的冷路径包括：program compile、
+PTOAS/codegen、binary register/materialize/load、runtime/context/owner/callable create/prepare、
+weight pack/prepare、普通 eager warmup、ACLGraph warmup、capture/build、最终采样地址上的
+首次 invocation/replay、一次性 structure/binding-cache 填充、event pool/runtime handle
+初始化、正式 benchmark warmup，以及 correctness golden 的生成、执行、比较和 validation-only
+copy。它们可以单独报告启动成本，但不进入最终稳态胜负。
+
+反之，正常服务调用每次真实发生的 production validation、tensor address/scalar patch、
+taskQueue enqueue/dequeue、AICPU/AICore scheduler、kernel execution，以及 workload 导致的
+反复 binding-cache replacement/cache miss，必须留在采样内。固定 captured binding 的
+ACLGraph replay 本来没有 Python per-replay patch，不能人为加入不存在的工作；这类结果也只
+证明固定 binding。若 eager/动态地址场景在 start event 之前确有 Host patch，正式主指标使用
+从 batch 第一个 backend per-call 工作到最后 caller-stream quiesce 的 steady critical path
+除以调用数；`host_enqueue` 与 `device_span` 只作不能相加的归因栏。
+
+正式胜负仍要求相同 workload、相同正确性、native 默认 overlap 开启、同一 device0 和
+caller stream 的 ABBA，至少 3 个 fresh process，每进程不少于 20 warmup 和 100 sample。
+令同轮 `D = native_q - pypto_q`，目标是 `median(D50) > 0`、`median(D90) >= 0`、
+`median(D99) >= 0`；任何 compile/warmup 优劣都不得代替这一稳态判据。
+
+本节与开发计划第 3.3 节是当前性能 goal 的唯一规范。第 52、57、62、64、68、69 节中的
+计时清单只是当时阶段的过程记录；其中任何缩略或缺项都不得解释为改变当前冷/热路径边界。
+
+## 71. `local_o_proj` 的 M32 优化、DFX 归因与保留结论
+
+在 merge 四路流水和完整 rope dependency 的基础上，把 `PROJ_A_ROW_TILE` 从 16 增大为
+32。该改动不改变 `A_K_TILE=256`、`N_TILE=128`、K 累加顺序、FP32 accumulator、最终
+BF16 `rint`、8-group submit 结构或公开 ABI。当前支持的 B4/B8/B12/B16、S8 对应物理
+token 数 32/64/96/128，均能被 32 整除，因此这个版本没有新引入 partial row tile；源码
+仍保留既有 `valid_shape`，不能把当前 bucket 集合整除误写成长期 ABI 保证。
+
+B4 下每个 group 的 `proj_a_mm` blocks 从 16 降至 8，8 组总计从 128 降至 64；编译后的
+片上资源从 M16 的 Mat/L1 约 144 KiB、L0A 16 KiB、L0B 64 KiB、L0C 8 KiB，变成 M32 的
+160/32/64/16 KiB，均未越界。三次 fresh-process、device0、mature C8191、ACLGraph、
+20 warmup/100 SAMPLE 的正式稳态结果如下，三轮采样前后正确性均全部通过：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 | `native - PyPTO` |
+| --- | ---: | ---: | ---: |
+| 1 | `715.420/720.596/726.700 us` | `750.830/764.064/775.414 us` | `-35.410/-43.468/-48.714 us` |
+| 2 | `717.540/725.006/729.825 us` | `740.630/755.996/768.642 us` | `-23.090/-30.990/-38.817 us` |
+| 3 | `725.980/732.506/739.560 us` | `745.070/755.504/763.261 us` | `-19.090/-22.998/-23.701 us` |
+
+日志为 `/tmp/csa_trb_merge_pipeline_proj_a_m32_mature8191_aclgraph_abba_w20_s100_run{1,2,3}.log`。
+三轮 PyPTO 中位数为 `745.070/755.996/768.642 us`，paired gap 中位数为
+`-23.090/-30.990/-38.817 us`，所以成熟上下文仍未超过 native；但相对最近同 DAG 的 M16
+单轮 `765.730/779.084/797.541 us`，方向性改善约 `20.66/23.09/28.90 us`。
+
+为避免只凭总 blocks 推断机制，又在独立进程用相同 callable 和输入运行 L2 chip-swimlane。
+artifact 为 `build_output/_jit_decode_csa_core_20260903_080644_476153/dfx_outputs/`，原始日志为
+`/tmp/csa_trb_merge4_rope_dep_pa32_qkm32_mature8191_l2_swimlane.log`。与第 69.11 节 PA16
+baseline 比，AICore makespan 从 `731.44 us` 降至 `698.00 us`；`proj_a_mm` blocks 128→64，
+全部 block core-sum 约下降 31.7%。最后一个 group 的关键尾段相对 qk 完成点为：merge
+`46.18 us`，PA `88.02–150.74 us`，cast `158.16–163.42 us`，PB
+`193.56–218.58 us`，最终 act 在 `219.52–227.56 us`。收益明确来自 PA 减块和 AIC 排队
+缩短，而不是 merge→PA overlap 变大；后者反而从 PA16 的 `15.92 us` 降到 `4.48 us`。
+
+因此 M32 是目前有真机稳态和 child DFX 双重证据的正优化，主线保留。其边界也必须写清：
+三轮 M32 与最近 M16 并非严格三对三的源码 A/B；B8/B12/B16、partial bucket 和长 churn
+仍要作为提交前回归，不能从 B4 外推。
+
+## 72. PA/PB 尾链微优化的反例
+
+### 72.1 把 PA 的 FP32→BF16 cast 融入同一 mixed task
+
+第一版让 AIC 产生 FP32 tile、AIV 直接 cast/store，编译器拒绝把动态 `pa_rows` 的
+`valid_shape` 从 AIC scope 物化到 AIV scope：`pa_rows` 既不是物理 tensor dimension、
+scalar parameter，也不是该 child 的 loop variable。完整失败日志为
+`/tmp/csa_trb_merge_pipeline_pa32_fused_cast_mature8191_aclgraph_abba_w20_s100_run1.log`，错误
+artifact 为 `build_output/_jit_decode_csa_core_20260903_081457_741068`。
+
+利用当前所有公开 bucket 均整除 32 的事实暂时移除 tail annotation 后，候选可编译并通过
+完整正确性，但稳态为 native `713.270/720.370/725.155 us`、PyPTO
+`758.740/770.286/775.811 us`，没有收益。日志为
+`/tmp/csa_trb_merge_pipeline_pa32_fused_cast_mature8191_aclgraph_abba_w20_s100_run2.log`。
+该候选已经全部撤销：独立 `proj_a_bf16` task、动态 `pa_rows/valid_shape` 和 PB 对 cast
+TaskId 的依赖均恢复，不能为省一个 completion 而削弱长期 shape 合同。
+
+### 72.2 取消无效 pipeline、放大 PB D tile
+
+随后分别做了三个单变量实验；都在 compile/capture、20 warmup 后采 100 个 device span，
+且采样前后正确性通过：
+
+| 候选 | native p50/p90/p99 | PyPTO p50/p90/p99 | 结论 |
+| --- | ---: | ---: | --- |
+| PA K loop `pipeline(stage=2)→range` | `726.300/733.608/736.667 us` | `755.180/765.598/771.876 us` | 退化，恢复 stage 2 |
+| PB `D_TILE 512→1024` | `731.580/738.550/743.208 us` | `756.890/767.838/777.984 us` | 单 group 并发减半，退化，恢复 512 |
+| PB K loop `pipeline(stage=2)→range` | `718.500/728.046/731.025 us` | `751.610/763.160/777.667 us` | 无稳定收益，恢复 stage 2 |
+
+日志依次为 `/tmp/csa_trb_merge_pipeline_pa32_stage1_mature8191_aclgraph_abba_w20_s100_run1.log`、
+`/tmp/csa_trb_merge_pipeline_pa32_pb_d1024_mature8191_aclgraph_abba_w20_s100_run1.log` 和
+`/tmp/csa_trb_merge_pipeline_pa32_pb_stage1_mature8191_aclgraph_abba_w20_s100_run1.log`。
+这些结果说明编译器报告“pipeline buffer 被串行复用”不等价于删掉 pipeline IR 一定更快，
+也说明不能只以 task 数更少判断 AIC 多核吞吐。
+
+### 72.3 PB N256→N128：未实现预期的 16 KiB Right tile
+
+把 `PROJ_B_MM_N_TILE` 从 256 改为 128 的初衷，是让每个 inner matmul 的 Right tile 从
+`128×128×BF16 = 32 KiB` 缩到 16 KiB，以便 stage-2 真正双缓冲。三轮结果为：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 | `native - PyPTO` |
+| --- | ---: | ---: | ---: |
+| 1 | `720.640/727.286/731.900 us` | `741.940/753.530/766.940 us` | `-21.300/-26.244/-35.039 us` |
+| 2 | `717.430/725.420/732.319 us` | `744.960/756.544/774.590 us` | `-27.530/-31.124/-42.271 us` |
+| 3 | `722.910/730.546/732.759 us` | `738.020/749.188/758.206 us` | `-15.110/-18.642/-25.447 us` |
+
+日志为 `/tmp/csa_trb_merge_pipeline_pa32_pb_n128_mature8191_aclgraph_abba_w20_s100_run{1,2,3}.log`。
+表面上 paired gap 比 N256 小数微秒，但 L2 artifact
+`build_output/_jit_decode_csa_core_20260903_082233_590814/dfx_outputs/` 给出了反证：backend
+内部仍选择 `128×128` Right tile，perf hint 仍是每 stage 32 KiB、只容纳 1/2 buffers；
+L2 makespan 反而约 `732 us`，高于 N256 的 `698 us`，PB 平均 block 也从约 25.91 增至
+27.16 us。也就是说预期机制并未发生，数微秒表面改善不足以抵抗进程间噪声。
+
+### 72.4 PB N256→N64：双缓冲容量告警消失，但碎片开销抵消收益
+
+进一步把 N tile 降到 64。artifact
+`build_output/_jit_decode_csa_core_20260903_082622_642648` 的 perf hints 不再在 PB 源码位置
+报告 32 KiB Right 的 `PH-MR-001`，说明该粒度终于越过了容量门槛；但每个 D512 block
+需要 8 个 N fragment，更多 inner-loop/搬运/指令固定成本抵消了这一收益。三次 fresh-process
+结果为：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 | `native - PyPTO` |
+| --- | ---: | ---: | ---: |
+| 1 | `720.170/727.172/729.568 us` | `751.910/764.356/774.308 us` | `-31.740/-37.184/-44.740 us` |
+| 2 | `727.900/735.926/739.734 us` | `735.210/750.632/759.208 us` | `-7.310/-14.706/-19.474 us` |
+| 3 | `715.940/723.322/727.921 us` | `751.220/763.654/768.204 us` | `-35.280/-40.332/-40.282 us` |
+
+日志为 `/tmp/csa_trb_merge_pipeline_pa32_pb_n64_mature8191_aclgraph_abba_w20_s100_run{1,2,3}.log`。
+paired gap 中位为 `-31.740/-37.184/-40.282 us`，比 N256 基线
+`-23.090/-30.990/-38.817 us` 更差。因此 N128、N64 均撤销，主线恢复 N256。这个实验也
+明确了后续原则：perf hint 消失只是机制证据，是否保留仍只由相同稳态口径的端到端数据决定。
+
+## 73. 两个 output group 共享一个 PB accumulator：任务变少但单块变重
+
+为减少 `proj_b_mm` completion 和 final fan-in，尝试让共享同一 merge tile 的两个 output
+group 共用一个 PB task：`partials` group 数从 8 降到 4，PB task 数从 8 降到 4，AIC block
+数从 64 降到 32。该实验保持数学、K 累加顺序、输入输出 ABI 和 ACLGraph binding 不变。
+
+三次 fresh-process、device0、C8191、ACLGraph、20 warmup/100 SAMPLE 的 PyPTO
+p50/p90/p99 分别为 `742.780/755.190/767.470 us`、
+`747.550/760.088/768.016 us` 和 `745.160/755.350/762.970 us`。对应日志为
+`/tmp/csa_trb_merge_pipeline_pa32_pb_pairacc_mature8191_aclgraph_abba_w20_s100_run{1,2,3}.log`。
+三轮 PyPTO p50 中位数 `745.160 us` 与原 8-task PB 基线 `745.070 us` 实质持平。
+
+L2 artifact `build_output/_jit_decode_csa_core_20260903_083520_000198` 给出了更直接的反证：
+整体 makespan 约 `724.60 us`，高于同阶段 64-block PB 基线约 `698 us`；每个 32-block PB
+task 的平均执行约 `43.79 us`，而原 64-block 版本单 block 平均约 `25.91 us`。减少 task
+数量没有减少总矩阵工作，反而让每个 block 更重并降低了尾部调度弹性。候选已完整撤销，
+继续保持每 output group 一个 PB task、共 8 个 PB TaskId。
+
+## 74. `o_r` projection scratch 改为 group-major：保留
+
+原 `o_r_pad/o_r_bf16_pad` 布局为 `[T, O_GROUPS * O_LORA]`，PA、cast 和 PB 都以单个
+output group 为消费者，却要使用 8192-element row stride。改为
+`[O_GROUPS * T, O_LORA]` 后，三段访问的 row stride 都降到 1024；public output、
+`partials`、数学、task DAG 和 workspace 总字节不变。
+
+三轮正式稳态结果如下，采样前后完整正确性均通过：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 | `native - PyPTO` |
+| --- | ---: | ---: | ---: |
+| 1 | `716.160/722.214/726.170 us` | `737.030/752.320/765.878 us` | `-20.870/-30.106/-39.708 us` |
+| 2 | `715.640/721.532/726.015 us` | `743.990/758.330/769.554 us` | `-28.350/-36.798/-43.539 us` |
+| 3 | `730.520/737.290/740.581 us` | `738.220/749.368/758.278 us` | `-7.700/-12.078/-17.697 us` |
+
+日志为
+`/tmp/csa_trb_merge_pipeline_pa32_or_groupmajor_mature8191_aclgraph_abba_w20_s100_run{1,2,3}.log`。
+PyPTO 三轮中位数为 `738.220/752.320/765.878 us`，相对第 71 节 PA32 基线改善约
+`6.850/3.676/2.764 us`。L2 artifact
+`build_output/_jit_decode_csa_core_20260903_084005_985578` 的 critical-path 工具报告 makespan
+约 `690 us`，并确认 PA store、cast load/store、PB activation load 的 stride 均按预期下降。
+该修改有生成物、L2 和三轮端到端证据，主线保留。
+
+## 75. `partials` 同步改成 group-major：producer 连续但 reducer 退化
+
+在第 74 节基础上，继续把 private `partials` 从 `[T, O_GROUPS * D]` 改为
+`[O_GROUPS * T, D]`。PB producer 的单 tile 地址跨度变小，但 final reducer 固定 token tile
+后依次遍历 8 个 group；相邻 group 起始地址从 16 KiB 扩大为 B4 下 512 KiB，破坏了 reducer
+局部性。三轮 PyPTO 为：
+
+| run | p50/p90/p99 |
+| --- | ---: |
+| 1 | `745.160/758.490/780.797 us` |
+| 2 | `742.390/753.710/764.803 us` |
+| 3 | `744.670/755.780/770.948 us` |
+
+日志为
+`/tmp/csa_trb_merge_pipeline_pa32_projection_scratch_groupmajor_mature8191_aclgraph_abba_w20_s100_run{1,2,3}.log`。
+中位数 `744.670/755.780/770.948 us` 比 `o_r`-only 版本分别慢
+`6.450/3.460/5.070 us`，因此只恢复 `partials` 为 token-major；`o_r` group-major 继续保留。
+
+## 76. PA、attention 和 merge 调度的三个单变量反例
+
+### 76.1 PA `N_TILE 128→256`
+
+放大 PA N tile 的首轮正式结果为 native `736.510/741.694/744.967 us`、PyPTO
+`750.900/762.048/768.149 us`，日志为
+`/tmp/csa_trb_merge_pipeline_pa32_na256_or_groupmajor_mature8191_aclgraph_abba_w20_s100_run1.log`。
+没有看到减少 fragment 的收益，候选立即恢复为 N128。
+
+### 76.2 attention `K_TILE 128→256`
+
+默认 ring slot 编译因 Vec `197888 B > 188416 B` 失败，日志为
+`/tmp/csa_trb_merge_pipeline_pa32_or_groupmajor_attn_k256_mature8191_aclgraph_abba_w20_s100_run1.log`，
+artifact 为 `build_output/_jit_decode_csa_core_20260903_085122_262399`。显式降到 slot2 后虽可编译
+且正确，但 PyPTO 为 `843.710/854.404/871.444 us`，native 为
+`726.240/732.846/735.750 us`；日志和 artifact 分别为
+`/tmp/csa_trb_merge_pipeline_pa32_or_groupmajor_attn_k256_slot2_mature8191_aclgraph_abba_w20_s100_run1.log`
+和 `build_output/_jit_decode_csa_core_20260903_085231_972603`。恢复 K128 和默认 slot；仅保留
+更通用的 `c_s0 = c_sb * ATTN_K_TILE - WIN` 索引公式。
+
+### 76.3 给 `merge_norm` 打开 early resolve
+
+该 hint 希望在 merge AIV 尚未完成时提前把后续 PA 预置到空闲 AIC，但 8 个 PA task 可能先占
+pending slot，形成 head-of-line blocking。两轮结果分别为：native
+`716.530/725.280/728.225 us`、PyPTO `746.930/756.658/767.197 us`；native
+`712.420/719.188/722.404 us`、PyPTO `748.370/766.352/785.154 us`。日志为
+`/tmp/csa_trb_pa32_or_groupmajor_merge_early_mature8191_aclgraph_abba_w20_s100_run{1,2}.log`。
+尾延迟明显不稳，已撤销 `allow_early_resolve=True`。
+
+## 77. QK scratch 两种重排：store 变少但 merge/tail 变差
+
+第一种把 QK scratch 改为完整 sparse-block-major `[token, sparse_block, head]`，使 M32 QK/PV
+每 item 的 store 从 12 次降到 6 次，但 merge 的 sparse-block stride 从 16 行增至 64 行。
+三轮 PyPTO 为 `737.470/750.264/762.964 us`、`740.840/759.798/769.514 us`、
+`732.750/761.032/777.035 us`。p50 有方向性收益，p90/p99 反而退化；日志为
+`/tmp/csa_trb_pa32_or_groupmajor_qk_sblockmajor_mature8191_aclgraph_abba_w20_s100_run{1,2,3}.log`。
+
+随后测试较保守的 `[token, head_batch32, sparse_block, row32]`，把 merge stride 控制为 32 行。
+一轮正式结果为 native `714.030/721.824/727.154 us`、PyPTO
+`742.800/755.094/768.509 us`。L2 artifact
+`build_output/_jit_decode_csa_core_20260903_090201_352515` 中 qk AIC 平均仅从基线约
+`125.15 us` 降到 `124.43 us`，但 merge 延迟和尾链更差，原始总时长约 `738.04 us`，高于
+`o_r`-only DFX 的约 `696.18 us`。日志为
+`/tmp/csa_trb_pa32_or_groupmajor_qk_hb32major_mature8191_aclgraph_abba_w20_s100_run1.log` 和
+`/tmp/csa_trb_pa32_or_groupmajor_qk_hb32major_mature8191_l2_swimlane.log`。两种 scratch 重排均已
+撤销，恢复原 head-tile-major 布局。
+
+## 78. `qk_wcur` 改为局部 Scalar：生成物变化真实，但无设备收益
+
+为删除计划阶段对单元素 GM cursor 的重复 read/write，曾把 `plan_w` 改为局部
+`pl.Scalar[pl.INDEX]`，只在 qk plan 末尾向 `qk_wcur` 写回一次。生成 C++ 确认游标成为局部
+SSA，`qk_wcur` 只剩最终一次 store；正确性也通过。首轮正式结果为 native
+`705.680/712.466/717.308 us`、PyPTO `737.720/754.494/768.516 us`，日志为
+`/tmp/csa_trb_pa32_or_groupmajor_qk_local_cursor_mature8191_aclgraph_abba_w20_s100_run1.log`。
+
+关键的 L2 机制门禁没有通过：artifact
+`build_output/_jit_decode_csa_core_20260903_090454_409930` 中
+`csa_slots_build_valid_qk_plan` 仍为平均 `18.46 us`，与 `o_r`-only 基线约 `18.10 us`
+持平。说明生成层面的 321 次表面 GM cursor 操作并不是当前真实瓶颈，或已经被后端等价消除；
+不能因为 IR 看起来更干净就宣称性能收益。候选及其静态断言已撤销，恢复原动态 cursor，未再
+消耗另外两轮板时。
+
+## 79. qproj `M_TILE 16→32`：减少稳态权重扫描，主线保留
+
+`qproj_matmul` 原来用 M16 两次遍历 B4 的 32 个 token，每次都扫描完整约 32 MiB `wq_b`。
+所有支持的 B4/B8/B12/B16、S8 bucket 的 T 都能被 32 整除，因此把 qproj 的 M tile 单独
+增到 32，可把 B4 权重读取从约 64 MiB 降到 32 MiB；MAC 数、K 累加顺序、64-block
+output-column grid、TaskId、public ABI 和 workspace 均不变。L0C 从 32 KiB 增到 64 KiB，
+仍低于 128 KiB 上限。
+
+三轮正式稳态结果如下；首次 compile、PTOAS、capture、first replay 和全部 warmup 均在
+`SamplingPhase.SAMPLE` 之前完成，不进入表中数字：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 | `native - PyPTO` |
+| --- | ---: | ---: | ---: |
+| 1 | `706.910/713.958/717.776 us` | `736.730/750.032/754.487 us` | `-29.820/-36.074/-36.711 us` |
+| 2 | `714.700/721.786/725.069 us` | `738.160/749.922/765.175 us` | `-23.460/-28.136/-40.106 us` |
+| 3 | `713.710/720.368/723.173 us` | `734.070/746.328/753.903 us` | `-20.360/-25.960/-30.730 us` |
+
+日志为
+`/tmp/csa_trb_pa32_or_groupmajor_qproj_m32_mature8191_aclgraph_abba_w20_s100_run{1,2,3}.log`。
+PyPTO 中位数为 `736.730/749.922/754.487 us`，相对第 74 节 `o_r`-only 中位数改善
+`1.490/2.398/11.391 us`；paired gap 中位数为 `-23.460/-28.136/-36.711 us`，成熟上下文
+仍未达到最终超过 native 的目标。
+
+L2 artifact `build_output/_jit_decode_csa_core_20260903_091120_373841` 确认 qproj 64 个 block
+平均执行从同机 DFX 基线 `15.09 us` 降为 `10.11 us`，约降 33%；observed critical path 中
+原来约 `73.2 us` 的 qproj family 已不再出现。整体 L2 makespan 受该次 qk、PA/PB 调度噪声
+影响为 `706 us`，不能拿单次总时长替代三轮稳态结果。鉴于核心机制真实、p50 没有实质退化、
+p90/p99 改善且没有新增 ABI/精度风险，主线保留 M32；后续仍须靠其他关键路径优化消除剩余
+约 `20–30 us` 稳态差距。
+
+## 80. PB `D_TILE 512→256`：采样前状态正确性失败
+
+在 qproj M32 保留版上，把每 group 的 PB output-D block 从 8 个增加到 16 个，意图是在某个
+group 刚 ready 时更充分占用 A3 的 20 个 AIC。Host 静态测试通过，fresh compile artifact 为
+`build_output/_jit_decode_csa_core_20260903_092011_843570`；但正式性能样本尚未开始，pre-timing
+correctness gate 就失败：`indexer_scale` 的 8 个 active row 全部 bit mismatch，最大绝对误差
+`0.25518798828125`，对应 dequantized 1014/1024 个元素非零误差。日志为
+`/tmp/csa_trb_pa32_or_groupmajor_qproj_m32_pb_d256_mature8191_aclgraph_abba_w20_s100_run1.log`。
+
+PB 的数学本不应修改上游 indexer state；因此该现象更可能是 block 数变化暴露了当前全图中的
+隐藏依赖、资源调度或状态可见性问题。无论根因是哪一种，它都已经违反“采样前完整状态正确”
+的硬门禁，不能只依据最终 attention output 仍在误差范围内继续测速。候选立即撤销，恢复
+`PROJ_B_D_TILE=512`；本次没有任何数字进入稳态性能结论。
+
+## 81. 两条 compressor scatter/pool 改为 batch-SPMD：局部加速、阶段性撤销
+
+### 81.1 动机与边界
+
+成熟 C8191 的 L2 显示，main compressor 和 indexer compressor 的
+`scatter_softmax_pool` 都是“一个 AIV task 内串行处理 B 个 request”：B4 下两者平均执行
+约 `47.58 us` 和 `52.62 us`。不同 request 通过各自的 block-table row 访问不同物理
+state，且 pooled row 也不重叠；因此将它改成“一个 runtime TaskId，`blockDim=B`，每个 AIV
+block 处理一个 request”不改 public ABI、workspace 字节数、数学、ACLGraph binding 或
+PyPTO/simpler。这不是把四次 host launch 塞进图，而是一个符合 L1 单算子边界的多核 task。
+
+### 81.2 PyPTO live-out 限制与 inline helper 规避
+
+首先直接在原 callable 里把 `pl.range(b_dim)` 改成 `with pl.spmd(...)`/
+`for ... in pl.spmd(...)`。两种写法都在 host orchestration 阶段失败：作为后续
+`rmsnorm_rope` 输入的 ChipTensor `pooled_kv` 被错误当成 scalar/live-out 参数传递。失败
+artifact 包括 `build_output/_jit_decode_csa_core_20260903_092339_379077`、
+`_092629_852756`、`_092814_301427` 和 `_092958_436982`。这证明当前 PyPTO 对“同一
+callable 内 outlined SPMD 产生 tensor live-out”的分析存在局限，但本轮明确不修改 PyPTO。
+
+规避方式是在各 compressor 内新建一个 `@pl.jit.inline` helper：helper 内创建并返回
+`pooled_kv`，同时用
+`pl.spmd(b_dim, name_hint="scatter_softmax_pool", allow_early_resolve=True)` 表达每 request 一个 block。
+helper 边界让现有 compiler 能正确建模 tensor 返回值，不改用户可见接口。main 和 indexer
+两条分支都通过了 fresh compile、capture、采样前/后全状态正确性与 replay。
+
+### 81.3 单改 indexer 和双分支 L2 证据
+
+只改 indexer 时，artifact 为
+`build_output/_jit_decode_csa_core_20260903_093209_985107`；`scatter_softmax_pool_0`
+从 1 block、平均 `52.62 us` 变为 4 blocks、每 block 平均 `17.26 us`，其后续
+`rmsnorm_rope` latency 从 `64.66 us` 降到 `6.44 us`。但该次 L2 总跨度为
+`708.48 us`，说明单改非主关键链分支无法直接兑现端到端收益。日志为
+`/tmp/csa_trb_pa32_or_groupmajor_qproj_m32_idx_scatter_bspmd_mature8191_l2_swimlane.log`。
+
+两条分支同时改造后，第一个 artifact `_093446_421189` 在编译未修改的
+`kv_hadamard_quant_cache_write_mixed` 时出现 PTOAS 失败；重试时源码不变即成功，因此记为
+一次可重试的工具链波动，不把它误归因为 scatter 语义错误。成功 artifact 为
+`build_output/_jit_decode_csa_core_20260903_093558_360621`，L2 结果为：
+
+| 任务 | qproj-M32 基线 | 双分支 batch-SPMD |
+| --- | ---: | ---: |
+| main `scatter_softmax_pool` | `1 x 47.58 us` | `4 x 14.15 us` |
+| indexer `scatter_softmax_pool_0` | `1 x 52.62 us` | `4 x 17.03 us` |
+| L2 earliest-dispatch 到 latest-finish | `712.12 us` | `688.90 us` |
+
+对应 L2 日志为
+`/tmp/csa_trb_pa32_or_groupmajor_qproj_m32_both_scatter_bspmd_mature8191_l2_swimlane.log`。
+
+### 81.4 三次 fresh-process ABBA 与严格归因
+
+device0、TRB、ACLGraph、B4/S8/C8191、20 warmup/100 SAMPLE 三次结果如下；首次编译、
+PTOAS、capture、first replay 和 warmup 不进入采样：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 | `native - PyPTO` |
+| --- | ---: | ---: | ---: |
+| 1 | `719.890/726.136/728.448 us` | `737.980/751.594/759.804 us` | `-18.090/-25.458/-31.356 us` |
+| 2 | `721.990/730.364/735.893 us` | `734.090/745.232/759.031 us` | `-12.100/-14.868/-23.138 us` |
+| 3 | `720.610/728.072/731.341 us` | `732.990/744.422/750.596 us` | `-12.380/-16.350/-19.255 us` |
+
+日志为
+`/tmp/csa_trb_pa32_or_groupmajor_qproj_m32_both_scatter_bspmd_mature8191_aclgraph_abba_w20_s100_run{1,2,3}.log`。
+双分支版本的跨进程中位数为：native `720.610/728.072/731.341 us`，PyPTO
+`734.090/745.232/759.031 us`，paired gap 为 `-13.480/-17.160/-27.690 us`。与第 79 节
+qproj-M32 基线的 gap `-23.020/-29.554/-31.314 us` 相比，三个分位点都收窄；
+PyPTO 自身跨进程中位数改善约 `2.640/4.690/-4.544 us`，p99 的进程间波动仍明显。
+
+但 paired gap 收窄不能单独支持保留：native 在两组进程间的中位 p50 自身慢了约
+`6.90 us`，而 PyPTO 绝对 p50/p90 只改善约 `2.64/4.69 us`，p99 还退化约
+`4.54 us`；这远小于 L2 单次的 23 us 表面收益，也落在当前进程间波动里。因此不把
+双分支结果解读成可保留的稳定优化，继续拆成 main-only 单变量验证。
+
+### 81.5 main-only 暴露隐藏调度/可见性问题，两处全部撤销
+
+先恢复 indexer scatter 为一个 `pl.at(CORE_GROUP)` 内的 `pl.range(b_dim)`，只保留 main
+batch-SPMD。第一次候选编译暴露了一个工具链语义细节：只把 inline helper 中的 SPMD
+换成 `pl.range` 不够，必须恢复外层 `pl.at`，否则 tensor op 落到 orchestration，报
+`Misplaced tensor op 'tensor.full'`。恢复 `pl.at` 后 host 静态测试 26/26 通过，fresh compile
+成功。
+
+main-only 前两次 fresh-process 的 native/PyPTO p50/p90/p99 分别为：
+
+- run1：`720.130/725.290/729.303 us` vs `738.750/751.482/757.113 us`；
+- run2：`712.620/720.234/723.979 us` vs `740.610/749.850/758.387 us`。
+
+两次均没有复现双分支 L2 的端到端信号。更关键的是第三个 fresh process 在开始性能采样前就
+被正确性门禁拦下：`indexer_scale` 8 个 active row 全部不一致，最大绝对误差
+`0.240509033203125`，对应 dequantized K 有 1014/1024 个非零误差；而 raw int8 K 本身仍
+bit-exact。日志为
+`/tmp/csa_trb_pa32_or_groupmajor_qproj_m32_main_scatter_bspmd_mature8191_aclgraph_abba_w20_s100_run{1,2,3}.log`，
+三个 artifact 为 `_094637_275033`、`_094720_835088` 和 `_094800_449774`。
+
+main scatter 的数学不应改写 indexer scale；因此这是额外 AIV 并行改变全图调度后暴露的
+隐藏依赖或可见性问题。在根因没有被单独解决前，该改造既没有稳定端到端收益，也不满足
+产品正确性。最终 main 和 indexer 两处 batch-SPMD 全部撤销，两者都恢复为一个
+`pl.at(level=pl.Level.CORE_GROUP, name_hint="scatter_softmax_pool")` 内串行 B 个 request。对 PyPTO
+live-out 限制的 inline helper 封装可保留为清晰的内部分层，但不再改变 blockDim。
+
+## 82. 重新定位 indexer scale 错误：单写 owner 修复后恢复 batch-SPMD
+
+第 81 节的“撤销”只是当时正确性门禁下的保守动作，不是最终根因结论。继续检查
+`decode_indexer_compressor.py` 后发现，batch-SPMD 改变调度顺序只是放大了一个原有的
+写 owner 问题：mixed AIC/AIV child 的两个 AIV subblock 都可能覆盖同一条
+`indexer_scale` cache row。raw int8 K 仍 bit-exact、只有 scale 整行错位，正是这个
+竞争的特征；PB block 数或 main scatter 数学本身不会修改 indexer scale。
+
+修复不增加全局同步，也不改变 public 44-slot ABI：在 indexer cache scatter 内读取
+`pl.tile.get_subblock_idx()`，只允许一个 AIV owner 执行 scale row 的循环写回，另一个
+subblock 的循环上界为零；K 数据仍由原有不重叠 owner 写入。Host 静态契约增加
+`cache_write_aiv` 与单写 owner 断言。修复后：
+
+- main 和 indexer 两条 `scatter_softmax_pool` 都恢复为一个 TaskId、`blockDim=B`
+  的 batch-SPMD；
+- B4 下每个 request 由独立 AIV block 处理，仍然不把多个 Host launch 暴露成多个算子；
+- 采样前、采样后 output、六类 mutable state、raw int8 K 与 FP16 scale 门禁均通过；
+- 后续所有正式候选和最终达标树都包含这个修复版，而不是第 81.5 节的 serial 临时回退。
+
+修复版三轮相对 native 的 paired `D50/D90/D99` 中位数曾为
+`-14.300/+2.956/+21.265 us`。这说明 scale owner 修复恢复了正确性和尾部收益，
+但当时 p50 仍未超过 native；因此它作为正确且局部更快的基础改造保留，不能单独冒充最终
+性能 PASS。第 81 节保留了错误如何被发现和隔离的时间顺序，本节则明确最终源码状态。
+
+## 83. 成熟上下文 QK/merge 分支实验：保留项与反例
+
+### 83.1 QK plan critical-path 状态下沉
+
+在 C8191 下，所有 token 的可见 compressed block 数已经达到固定上界。原实现仍在每个
+QK/merge item 上反复读 `valid_block_mask`。后续把“本批次是否全部 full”作为
+`qk_wcur[1]` 由 plan task 一次写入；QK 和 merge child 先读这个 device 状态，
+只有非全满时才读取逐 block mask。它不依赖 Host 读取 metadata，不改变 graph binding，
+短上下文仍走原 mask 分支。
+
+三轮 formal 的 paired 中位数为 `-4.870/-9.410/-15.923 us`。单看端到端没有
+形成胜出，但机制删除的是成熟上下文中确定冗余的 cross-task GM mask read，短路径仍有
+完整 fallback，且后续与其他优化组合时没有精度或 ABI 代价，因此保留。
+
+### 83.2 直接按自然 QK 顺序执行：撤销
+
+尝试删除 `qk_order` 间接表，让 consumer 直接按 plan 的物理顺序取 item。
+三轮 paired 中位数为 `-9.120/-15.974/-14.775 us`。它减少了索引读取，却改变了
+AIC sibling 的 ready/retire 顺序，使尾链更差；恢复显式 order。
+
+### 83.3 为 full 分支复制一套 branch-free merge：撤销
+
+另一个候选把 all-full 与 partial 两条 merge 代码完全展开，企图消除 tile 内条件分支。
+生成代码明显增大，instruction/cache 与 dispatch 代价抵消了少量分支收益；paired 中位数
+为 `-3.800/-8.416/-16.470 us`。恢复共享主体和轻量 device gate。
+
+### 83.4 valid-only queue 加 RoPE seed、删除 runtime 分支：撤销
+
+该候选让 plan queue 只保存真实有效 item，并用已经存在的 rope/seed 信息恢复 mandatory
+block，希望 child 不再判断 validity。数值门禁通过，但三轮 formal paired 中位数为
+`-12.830/-14.836/-18.208 us`，日志为
+`/tmp/csa_trb_qk_queue_valid_no_branch_ropecs_mature8191_aclgraph_abba_w20_s100_run{1,2,3}.log`。
+删除分支没有缩短实际 critical path，反而增加 plan/索引工作；完整撤销。
+
+### 83.5 scalar mature fast-only：不能据此保留
+
+只针对成熟上下文把 qk validity 变成 scalar fast-only 的三轮 paired 中位数为
+`-19.950/-2.318/+13.732 us`。p99 有改善但 p50 明显退化；它不能满足正式三分位
+门槛，也不能牺牲短上下文 fallback，因此未作为最终路径。
+
+### 83.6 local zero bias：保留
+
+all-full 时不再从 GM 读取已经知道为零的 `sparse_bias` 行，而是在 tile 内构造零
+bias；非全满仍读取原 bias。三轮结果为：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 | `native - PyPTO` |
+| --- | ---: | ---: | ---: |
+| 1 | `730.100/736.414/740.303 us` | `730.610/746.046/752.870 us` | `-0.510/-9.632/-12.567 us` |
+| 2 | `727.210/731.960/737.425 us` | `721.840/731.990/737.658 us` | `+5.370/-0.030/-0.234 us` |
+| 3 | `721.400/726.550/730.124 us` | `730.410/740.778/752.127 us` | `-9.010/-14.228/-22.003 us` |
+
+paired 中位数为 `-0.510/-9.632/-12.567 us`。它单独不构成端到端收益证据，
+但生成逻辑明确删除全满路径的无意义 GM load，fallback 完整，后续最终组合通过，故保留。
+
+### 83.7 QK output scratch 改 BF16：撤销
+
+把 QK/PV 的 FP32 `oi` scratch 提前压成 BF16 虽然减少 GM 字节，却改变跨 sparse block
+的 merge 精度边界，同时引入额外 cast；板上性能更差，且没有理由接受更弱的数值契约，
+因此恢复 FP32 scratch。
+
+## 84. 从 A3 timeline 重建最终优化前的关键链
+
+对 artifact `build_output/_jit_decode_csa_core_20260903_115926_341156` 的 timeline
+按 TaskId、dispatch、begin/end 和依赖边重建出 16-node observed critical path。关键尾段为：
+
+| 节点 | device execution | 与下一个关键节点的 gap |
+| --- | ---: | ---: |
+| qk plan | `3.84 us` | `4.44 us` |
+| qk/pv | `117.92 us` | `8.48 us` |
+| merge/norm | `19.12 us` | `30.98 us` |
+| projection A | `69.92 us` | `29.06 us` |
+| FP32→BF16 cast | `4.00 us` | `4.50 us` |
+| projection B | `27.48 us` | `29.50 us` |
+| final activation/reduce | `8.28 us` | `1.18 us` |
+
+这个分解说明剩余差距已经不只是某个 kernel 算术慢：merge→PA、PA/cast→PB、PB→final
+有三个约 29–31 us 的调度/ready gap。于是后续优先级改为：
+
+1. 尝试删除 PA→cast 边界；
+2. 减少 PB completion/final fan-in；
+3. 改善 PB weight 访存；
+4. 调整 sibling submit 顺序；
+5. 融合 indexer 尾链的相邻 AIV task。
+
+这也避免继续盲目修改已经接近硬件吞吐的 QK tile。
+
+## 85. PA 通过 FIXPIPE 直接下转 BF16：PyPTO codegen 边界，撤销
+
+### 85.1 目标
+
+理想路径是在 cube PA accumulator 写 GM 时通过 FIXPIPE 直接得到 BF16
+`o_r_bf16_pad`，删除单独的 `proj_a_bf16` AIV task 和一条依赖边。数学上仍是
+FP32 accumulate 后一次 round-to-BF16，与 native 边界一致。
+
+### 85.2 三层失败
+
+第一版直接把高层 `Acc`/tile 值交给 store，暴露高层类型无法表达预期 producer
+pipe。第二版显式 materialize/load/transpose，compiler 把一个 PA group 拆成 AIC+AIV；
+动态末尾 row 通过 `valid_shape` 进入 child ABI 时失败：
+
+`PTO codegen cannot materialize symbol 'pa_rows...'; pass the extent as a scalar parameter`。
+
+对应日志和 artifact 为
+`/tmp/csa_proj_a_fixpipe_mature8191_correctness.log` 与
+`build_output/_jit_decode_csa_core_20260903_124554_583990`。
+
+把 B4 specialization 改为静态完整 32 rows 后，动态 extent 问题消失，但 PTOAS 又明确报：
+
+`'pto.tpush' op tile type must map to a supported producer pipe`。
+
+日志和 artifact 为
+`/tmp/csa_proj_a_fixpipe_static_mature8191_correctness.log` 与
+`build_output/_jit_decode_csa_core_20260903_124902_108053`。
+
+因此该候选从未进入 device 执行，更没有性能数字。当前 PyPTO 对这类 accumulator→FIXPIPE
+downcast 的合法 tile/producer 映射不足；本任务又明确不修改 pypto-lib，故完整恢复独立 cast。
+这是编译器能力缺口，不应伪装成 CSA kernel 算法失败。
+
+## 86. PB 两类 fan-in 缩减实验均失败
+
+### 86.1 两个 output group 共用一个 pure-AIC PB task
+
+将共享 merge tile 的两个 group 合成一个 PB task，期望 TaskId 从 8 降到 4。三轮 paired
+中位数为 `-7.150/-16.498/-24.062 us`。单 task 工作翻倍、可调度并行度下降，
+completion 反而更晚；撤销。
+
+### 86.2 FP32 atomic accumulator
+
+第二个方案将 `[T, G*D]` deterministic partials 改成 `[T, D]` FP32 accumulator：
+新增 zero task，8 个 PB child 以 `AtomicAdd` 写共享 output，final task 只 cast。
+Host 27 项静态测试通过，fresh compile 生成物确认 `TSTORE AtomicAdd`，采样前后 output、
+六类 state、raw K/scale 也全部通过。但前两轮 formal 已足以否定三轮中位 PASS：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 | `native - PyPTO` |
+| --- | ---: | ---: | ---: |
+| 1 | `721.850/727.360/731.767 us` | `723.400/734.744/747.727 us` | `-1.550/-7.384/-15.961 us` |
+| 2 | `716.860/724.124/727.971 us` | `729.340/742.112/750.971 us` | `-12.480/-17.988/-22.999 us` |
+
+日志为
+`/tmp/csa_trb_proj_b_atomic_mature8191_aclgraph_abba_w20_s100_run{1,2}.log`。
+两个 process 的三个分位点都为负，第三轮无论取值都不可能让三点中位数通过，因而停止耗板。
+原子争用、zero task 和非确定归约顺序没有换来更短尾链；最终完整恢复 8 份 FP32 partials
+和固定 group 0→7 的 ordered reduction。
+
+## 87. `wo_b` tile-major 冷打包：保留
+
+### 87.1 问题与布局
+
+public ABI 的 `wo_b` 为 `[D, G*K] = [4096, 8192]` BF16。PB 每次只取某个 group
+的 K tile，在逻辑布局上生成的 weight tile stride 为 `[8192, 1]`，每个 256-row
+tile 都是大跨度读取。新方案在 `pack_decode_csa_weights` 冷路径把物理元素顺序改成：
+
+`[G, D/N, K/BK, N, BK]`，其中 `N=BK=256`。
+
+对外 tensor shape 仍保持 `[D, G*K]`，所以 44-slot ABI、program specialization 和
+launch 参数数量均不变。kernel 内只把相同 storage reshape 成 BK-wide rows，并用
+`weight_row0` 取连续 `[256,256]` tile。生成物确认 weight stride 从
+`[8192,1]` 变成 `[256,1]`。
+
+代价必须显式记录：source model 参数仍然存活，prepared owner 还要 pin packed tensor；
+每 layer 增加约 64 MiB device storage。打包只发生在 prepare/warmup 冷阶段，不进入 launch、
+capture 或 steady replay。
+
+### 87.2 单变量结果
+
+correctness 全部通过。两轮 formal 为：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 | `native - PyPTO` |
+| --- | ---: | ---: | ---: |
+| 1 | `721.860/729.228/733.093 us` | `716.990/726.778/737.831 us` | `+4.870/+2.450/-4.738 us` |
+| 2 | `709.320/716.646/719.672 us` | `720.940/730.588/736.491 us` | `-11.620/-13.942/-16.819 us` |
+
+日志为
+`/tmp/csa_trb_wo_b_tilemajor_mature8191_aclgraph_abba_w20_s100_run{1,2}.log`。
+两轮 p99 都未同时为正，第三轮无法形成严格 PASS；但 PyPTO 自身 absolute latency/tail
+相对前一正式基线有明显下降，生成 stride 机制证据明确，也没有热路径额外工作，因此作为
+后续组合的基础保留。
+
+## 88. projection group 反向 pair 提交：保留
+
+对五份 A3 timeline 逐个核对后，merge head tile 通常按 `3→2→1→0` ready；
+同一 manual scope 内 sibling dispatch 呈 LIFO-like，导致自然提交 `0..7` 时，
+group0 对应 PB 常比可达最早时间晚约 3.3–13.3 us，最终又必须等待所有 8 group。
+
+新顺序不是反转数学归约，而只反转每两个 group 的 submit pair：
+`[6,7,4,5,2,3,0,1]`。这样最新入队的低 pair 对应最后 ready 的 merge，减少
+head-of-line 空转；每个 PA/PB 的 dependency、output owner、`partials` 坐标及 final
+0→7 reduction 均保持不变。
+
+tile-major 基础上的两轮为：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 | `native - PyPTO` |
+| --- | ---: | ---: | ---: |
+| 1 | `708.830/717.782/720.856 us` | `717.170/727.746/733.496 us` | `-8.340/-9.964/-12.640 us` |
+| 2 | `715.710/722.778/726.634 us` | `720.360/731.530/736.282 us` | `-4.650/-8.752/-9.648 us` |
+
+日志为
+`/tmp/csa_trb_wo_b_tilemajor_reverse_pairs_mature8191_aclgraph_abba_w20_s100_run{1,2}.log`。
+严格 PASS 在两轮后已不可能，但 PyPTO absolute p99 继续改善；其机制与依赖不变式可验证，
+故作为组合候选保留。
+
+## 89. 融合 indexer dequant 与 RoPE
+
+### 89.1 原尾链及融合边界
+
+原 score 分支在 `idx_qr_proj_matmul` 后依次执行：
+
+`idx_qr_proj_dequant -> qr_rope -> qr_hadamard_quant_mixed`。
+
+前两个都是 AIV，之间通过约 1 MiB FP32 `qr_proj` GM tensor 交接。融合后的
+`idx_qr_dequant_rope` 仍以每 token 的 32-head block 为 task，每个 block 顺序处理两个
+16-head/2048-element 子 tile；scale 用现有 `pl.read` scalar 读取。dequant 后仍先按
+native 语义 round 到 BF16，再转 FP32 做 RoPE，最后再次按原边界 round 到 BF16。
+因此删除的是 GM handoff 和 TaskId barrier，不是数值 rounding。
+
+融合使 score-only predicated child 数从 7 降到 6，不增加 public 参数，也不影响短上下文
+device predicate：gate false 时 fused child 与其前后任务一起退休，gate true 时正常执行。
+
+### 89.2 两个编译反例
+
+第一版把单个 scale 表达为 `[1,1]` col-major tile，PTOAS 报列字节只有 4、未满足
+32-byte 对齐。日志和 artifact：
+
+- `/tmp/csa_trb_tilemajor_reversepairs_idx_qr_fused_mature8191_aclgraph_abba_w20_s100_run1.log`；
+- `build_output/_jit_decode_csa_core_20260903_131237_619007`。
+
+第二版先 load `[8,1]` 再 slice `[1,1]`，中间 row-major tile 仍因 row bytes
+只有 4 失败。日志和 artifact：
+
+- `/tmp/csa_trb_tilemajor_reversepairs_idx_qr_fused_mature8191_aclgraph_abba_w20_s100_run1b.log`；
+- `build_output/_jit_decode_csa_core_20260903_131353_443696`。
+
+最终使用语言已有的 `pl.read(wq_b_scale, [index])` scalar 表达，不新造 ABI，
+artifact `build_output/_jit_decode_csa_core_20260903_131445_904060` 成功编译。
+生成物同时确认 fused kernel 存在、旧两个 child 不再存在、PB weight stride 为连续
+`[256,1]`。
+
+## 90. 最终三项组合正式超过 native
+
+最终候选由 `wo_b` tile-major、reverse pair submit 与
+`idx_qr_dequant_rope` fusion 组成，并包含此前所有已保留正确性/关键链改造。
+正式协议固定为 device0、A3、TRB、ACLGraph、TP1、B4/S8、ratio4、start-position 8191；
+native production 保持 multistream overlap。每轮 fresh process，20 次 benchmark warmup、
+100 个 `SamplingPhase.SAMPLE`，同 caller stream ABBA。
+
+首次 program compile、PTOAS/codegen、binary/runtime/context/owner/callable prepare、
+weight packing、ordinary/ACLGraph/benchmark warmup、capture、first final-binding replay、
+one-time cache/event 初始化、correctness golden 与 validation copy 全部在 SAMPLE 前完成并
+caller-quiesce，不进入数字。固定 captured binding 本来没有每 replay Python 地址/scalar
+patch，不能据此声称动态 binding 也同样快。
+
+三轮全部通过采样前和采样后的 output、六类 mutable state、raw K 与 scale 门禁：
+
+| run | native p50/p90/p99 | PyPTO p50/p90/p99 | `native - PyPTO` |
+| --- | ---: | ---: | ---: |
+| 1 | `727.460/734.704/737.949 us` | `705.870/718.912/730.880 us` | `+21.590/+15.792/+7.068 us` |
+| 2 | `724.700/732.510/736.001 us` | `711.400/724.110/732.607 us` | `+13.300/+8.400/+3.394 us` |
+| 3 | `712.550/718.186/724.581 us` | `700.280/709.086/717.236 us` | `+12.270/+9.100/+7.345 us` |
+
+日志分别为：
+
+- `/tmp/csa_trb_tilemajor_reversepairs_idx_qr_fused_mature8191_aclgraph_abba_w20_s100_run1c.log`；
+- `/tmp/csa_trb_tilemajor_reversepairs_idx_qr_fused_mature8191_aclgraph_abba_w20_s100_run2.log`；
+- `/tmp/csa_trb_tilemajor_reversepairs_idx_qr_fused_mature8191_aclgraph_abba_w20_s100_run3.log`。
+
+跨 process 中位数：native 为 `724.700/732.510/736.001 us`，PyPTO 为
+`705.870/718.912/730.880 us`。严格按每 process 先做配对差、再取三轮中位数：
+
+`D50/D90/D99 = +13.300/+9.100/+7.068 us`。
+
+三项分别满足预先定义的 `D50>0`、`D90>=0`、`D99>=0`；而且三轮九个
+分位点的 paired difference 全为正。至此，当前 fixed-binding
+B4/S8/C8191 TRB ACLGraph 常态化性能目标正式 PASS。结果结构化固化在
+`tests/pypto_dsv4_decode_csa/results/20260903_device0_trb_steady_state_performance.json`。
+
+## 91. 最终源码的跨 bucket 编译与功能回归
+
+正式性能只宣称 B4，但最终源码重新编译了四个静态 batch specialization：
+
+| bucket | fresh artifact |
+| --- | --- |
+| B4 | `build_output/_jit_decode_csa_core_20260903_131854_932598` |
+| B8 | `build_output/_jit_decode_csa_core_20260903_131900_192340` |
+| B12 | `build_output/_jit_decode_csa_core_20260903_131906_522936` |
+| B16 | `build_output/_jit_decode_csa_core_20260903_131915_641441` |
+
+这四个 artifact 只证明正静态 shape、task graph、tile-major address formula 和融合 child
+可生成，不能替代四 bucket 的正式性能。
+
+随后补了三组不同边界的 device0 数值回归：
+
+1. HBG、B4/C8191、ACLGraph 三次 replay：output、六类 state 全通过，raw K 与 scale
+   exact；日志
+   `/tmp/csa_hbg_tilemajor_reversepairs_idx_qr_fused_mature8191_aclgraph_correctness.log`，
+   artifact `build_output/_jit_decode_csa_core_20260903_132012_955970`。
+2. TRB、B4/C0、ACLGraph 三次 replay：短上下文 predicate/direct selection 路径通过；
+   日志 `/tmp/csa_trb_tilemajor_reversepairs_idx_qr_fused_short_aclgraph_correctness.log`，
+   artifact `build_output/_jit_decode_csa_core_20260903_132103_193925`。
+3. TRB、B16/C8191、eager 一步：output、六类 state 通过；4096 个 active raw K 和 32 个
+   scale 值 exact；日志
+   `/tmp/csa_trb_tilemajor_reversepairs_idx_qr_fused_b16_mature8191_eager_correctness.log`，
+   artifact `build_output/_jit_decode_csa_core_20260903_132158_768595`。
+
+HBG 当前遇到 predicate 时仍可能使用 ordinary fallback，所以上述 HBG 只证明 graph owner、
+capture/replay 和数值生命周期，没有 HBG 性能声明。
+
+## 92. 当前完成结论与仍然开放的产品边界
+
+本轮在不修改 pypto-lib/simpler 的前提下，已经完成 vLLM-Ascend 内独立 CSA L1 kernel、
+weight adapter、custom-op dispatch、TRB/HBG ACLGraph 单算子回归、全 mutable-state
+correctness gate、跨 bucket compile，以及一组严格的成熟上下文稳态性能 PASS。
+
+当前可以陈述：
+
+- A3 device0、TP1、B4/S8/C8191、固定 captured binding 的 TRB ACLGraph 下，
+  PyPTO 常态 device span 超过 native production；
+- 结论排除了首次编译与所有 warmup，但保留实际 steady replay 中的 taskQueue dequeue、
+  scheduler、kernel 和依赖 gap；
+- 最终三轮 paired 中位收益为 `+13.300/+9.100/+7.068 us`；
+- 最终源码在 B4/B8/B12/B16 均可 fresh compile，并有 HBG mature、TRB short 和
+  TRB B16 mature 的补充功能回归；
+- runtime/simpler/PyPTO 未因本任务被修改。
+
+仍不能陈述：
+
+- 动态 tensor address/scalar workload 已经超过 native；这需要把 Host patch 到最终
+  quiesce 的 steady batch critical path 纳入主指标；
+- B8/B12/B16、ordinary eager 或 HBG 性能已经超过 native；
+- 完整 vLLM Engine、完整 DeepSeek V4、TP/EP/HCCL/MoE 或 server tokens/s 已验证；
+- 同 device 并发 replay 安全；
+- A5 或 simulator 已验证。
+
+另外，private kernel primitive 的 CANN Open Software License v2 provenance/NOTICE 与
+vLLM-Ascend Apache-2.0 根许可证之间的发布处理仍未得到维护者确认。在许可证方案关闭前，
+功能源码不能作为“可发布完成态”提交；这个阻塞只影响提交/发布所有权，不否定上述
+device0 运行证据。
+
+## 93. 收敛检查、格式化与结果指纹
+
+最终功能/性能树完成后，对 `vllm_ascend/ops/dsa.py`、
+`vllm_ascend/ops/_pypto_dsv4_csa/` 和 `tests/pypto_dsv4_decode_csa/` 执行
+Ruff。首次 `ruff check` 无 lint 错误，`ruff format --check` 指出 10 个本任务
+文件需要机械格式化；执行 `ruff format` 后再次检查为 `62 files already formatted`，
+`git diff --check` 与结果 JSON `jq empty` 均通过。
+
+格式化后重新运行完整 Host suite，结果为：
+
+最终一次语义等价 identifier 澄清后的结果为
+`531 passed, 14 warnings in 68.43s`。
+
+14 条 warning 全部来自环境中的 `torch.jit.script_method` deprecation，不是测试失败。
+新增的静态 ABI guard 进一步锁定：
+
+- PB 必须通过 `wo_b_tile_rows` 和 `weight_row0` 访问 tile-major storage；
+- 不得回退到逻辑 `wo_b[n0:..., g*O_LORA+...]` 的 `[8192,1]` stride；
+- reverse pair submit、deterministic partials、无 atomic、fused
+  `idx_qr_dequant_rope` 与 6 个 predicate child 保持不变。
+
+正式测量前源码树 SHA256 为
+`c1273a557d0ffe1d0dc9a3e3434dfb35296828bc8b483088c052c6abfd7ff220`，
+benchmark entry 为
+`47ad1c41485ca80b54b91232d3bd46b880ac3c689b7ff8e4ead043834f00b3bb`。
+机械格式化后的当前源码树和 entry SHA256 分别为
+`5d3726a7dd2c7c36b81720380a03e5be1053515ee0d18e2fdc3b513b4dcfb4b3` 与
+`0bde99527df621ffbedfd408ea36b7862ff5b33294d943b69542f2e95b10e439`。
+结果 JSON 同时保存 measured/current 两组指纹，并明确 post-measurement 变化仅为格式化和
+Host 静态断言以及 lint-only identifier/comment 澄清，避免用新文本 hash 冒充原始
+device artifact。
+
+定向提交前 hooks 中，Ruff、Markdown、codespell、typos、forbidden-import、包结构、
+boolean context manager 和长函数检查均通过。为使合法 DSL 词通过仓库拼写规则，
+codespell 增加 `InOut/inout/subtile/subtiles/ue8m0` 白名单，typos 增加
+`subtiles/ue8m0/ScatterNdUpdateV2`；同时把内部含糊的 output-tile count、output-tile
+index 和 compressed-length 缩写改成
+`QR_OUTPUT_TILE_COUNT/output_tile/compressed_len`，不改变生成图或数学。
+
+全仓型 hook 仍有两个与本任务代码无关的环境/dirty-tree阻断：logger hook 命中用户已有的
+`vllm_ascend/models/pypto_qwen3.py`，gitleaks hook 从 OBS 下载了 x86-64 binary，无法在当前
+aarch64 环境执行。下载产生的 21 MiB `gitleaks` 临时文件已经精确删除；没有改动前述用户
+Qwen3 文件，也没有把这两个外部阻断写成“本任务 lint 失败”。
+
+提交边界保持不变：本轮功能文件只属于 vLLM-Ascend，用户已有 Qwen3/worker/root issue
+改动不 stage；PyPTO 与 simpler 没有写入。许可证方案未关闭前，不把 private kernel
+源码提交成可发布 Apache-2.0 功能代码；允许单独形成文档/证据 checkpoint，且不默认 push。
