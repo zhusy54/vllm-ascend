@@ -170,12 +170,16 @@ Native 38 个算子的完整逐项数据见 `native_operator_breakdown.csv`。�
 
 ## 8. PyPTO 外层可观测分解
 
-![PyPTO ACLGraph 两轮 device 泳道图](pypto_device_swimlane.svg)
+`pypto_trace_view.json` 是从完整 ABBA trace 中拆出的两轮 PyPTO Perfetto JSON，时间戳和
+event payload 均保持原样。它只显示 CANN profiler 确实记录的 MODEL control、两次 DMA、
+AICPU scheduler 和 AICore 外层 kernel；`aicore_kernel_0` 内部 child task 在这份外层
+profile 中不可见。Native 对应入口为 `native_trace_view.json`，完整 ABBA trace 仍位于
+`profiler_output/trace_view.json`。
 
-该图将两轮 replay 都按各自 `MODEL_EXECUTE` 起点归一化，并使用完全相同的
-`0–820 us` 横轴，因此两轮 bar 长度可以直接比较。图中只绘制 profiler 确实记录的
-MODEL control、两次 DMA、AICPU scheduler 和 AICore kernel；`aicore_kernel_0` 内部
-child task 不可见。
+当前最终 PyPTO program 的逐物理核 child-task 泳道另见
+`../20260903_device1_pypto_child_swimlane/pypto_child_task_swimlane.json`。它展开全部
+`AIC_0…AIC_19` 与 `AIV_20…AIV_59`，但来自同 callable 的独立 L2 DFX run，只能用来分析
+task 排布与 scheduler gap，不能替换本节 L1 ACLGraph profile 的绝对时延。
 
 | 指标 | PyPTO #1 | PyPTO #2 | 两轮均值 |
 | --- | ---: | ---: | ---: |
@@ -193,20 +197,22 @@ AICPU 和 AICore 大部分时间重叠，不能把二者耗时相加。真正进
 ACL-to-NPU flow parser 报过关联告警，所以“它们就是 `LaunchKernelWithHostArgs` 的 H2D
 tiling”只能作为高概率推断，不能作为已验证事实，也不能和 `3.600 us` 外围净差机械相加。
 
-## 9. 当前证据不能回答什么
+## 9. 当前证据边界
 
-1. 不能回答 PyPTO 的 `q_proj`、compressor、indexer、sparse attention、`wo_a/wo_b`
-   各自真实耗时，因为外层 profiler 不展开 38 个 PyPTO top-level submit 的 child 时间线。
-2. 不能证明 PyPTO child 全部串行；只能证明当前外层 AICore 区间没有兑现足以匹配 Native
-   的并行收益。
-3. 不能评价最终实现。该 profile 早于 tile-major weight pack、projection group
+1. 本目录的外层 L1 profile 不能回答 PyPTO 的 `q_proj`、compressor、indexer、sparse
+   attention、`wo_a/wo_b` 各 child 的真实耗时；同级逐核 JSON虽能回答当前最终 DAG 的
+   task 排布和单 task 时间，却不是这轮历史 L1 replay 的同次采样。
+2. 外层 trace 本身不能证明 PyPTO child 全部串行。逐核 JSON已经证明真实 task 会跨
+   20 个 AIC 与 40 个 AIV 并发，但其 L2 DFX 时间不能直接归入本节 L1 性能差距。
+3. 本目录不能评价最终实现。该 profile 早于 tile-major weight pack、projection group
    逆序提交以及 `idx_qr_dequant_rope` 融合。
 4. 不能外推到动态 tensor 地址/scalar、B8/B12/B16、HBG、完整 Engine 或多层模型。
 
-若要获得真正一一对应的 PyPTO child 对比，需在 borrowed-device L1 ABI 中增加不会改变
-调度语义的 child start/end 时间戳或 PMU/DFX buffer，并确保记录开销可单独测量和关闭。
-在这项能力存在前，最可信的优化验证方式仍是：保持相同 correctness gate，对单一 DAG/
-kernel 变更做 fresh-process ABBA A/B，并用外层 AICore span 判断收益。
+若要获得与某一次 L1 ACLGraph replay 严格一一对应的 child 时间线，仍需在
+borrowed-device L1 ABI 中增加不会改变调度语义的低开销 child start/end 或 PMU/DFX
+buffer，并确保记录开销可单独测量和关闭。在这项能力存在前，最可信的性能验证方式仍是：
+保持相同 correctness gate，对单一 DAG/kernel 变更做 fresh-process ABBA A/B，并用外层
+AICore span 判断收益；独立 L2 逐核泳道用于解释内部机制。
 
 ## 10. 数据来源与复核
 
@@ -218,8 +224,11 @@ kernel 变更做 fresh-process ABBA A/B，并用外层 AICore span 判断收益�
 - `benchmark_run.txt`：正式 100 样本结果、正确性门禁和 profiler 配置。
 - `gap_decomposition.csv`：本分析中的差距闭合数据。
 - `native_operator_breakdown.csv`：Native 38 个可见算子的逐项数据。
-- `pypto_device_swimlane.svg`：PyPTO 两轮 replay 的等比例 device 泳道图。
-- `generate_pypto_swimlane.py`：从原始 `task_time.csv` 重建泳道图的确定性生成器。
+- `native_trace_view.json`：两轮 Native 的派生 Perfetto timeline。
+- `pypto_trace_view.json`：两轮 PyPTO 的派生外层 Perfetto timeline。
+- `split_trace_view.py`：从完整 ABBA trace 重建两份派生 timeline。
+- `../20260903_device1_pypto_child_swimlane/pypto_child_task_swimlane.json`：当前最终 PyPTO
+  program 的逐 AIC/AIV child-task Perfetto timeline。
 
 计算使用十进制定点数读取 profiler 的巨大绝对时间戳，避免 binary float 消减误差。
 以下恒等式已逐轮复核：

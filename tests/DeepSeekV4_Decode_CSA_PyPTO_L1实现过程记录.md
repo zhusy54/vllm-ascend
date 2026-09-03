@@ -5667,3 +5667,72 @@ AICPU 相对 AICore 的 lead 和 completion tail。时间戳先用 `Decimal` 做
 图中没有伪造 PyPTO child 泳道：当前 CANN profiler 只暴露外层 AICPU scheduler 与
 `aicore_kernel_0`，不能看到其内部 child 的真实 start/end。若未来为 borrowed-device L1
 增加低开销 child DFX，可在保留本图作为外层基线的同时另增 child-level 泳道。
+
+## 95. 修正泳道交付并采集逐 AICore child-task JSON
+
+用户进一步澄清，“PyPTO 算子的泳道图”指的是 PyPTO 内部 child task 在每一个物理
+AIC/AIV 核上的细分泳道，且主交付应为可交互查看的 Perfetto JSON，而不是把 CANN 外层
+trace 重画成静态 SVG。第 94 节生成的 SVG虽然没有伪造数据，但只包含
+`simpler_aicpu_l1_exec_*` 与 `aicore_kernel_0`，没有满足该需求。因此本轮删除该 SVG及其
+生成器；原始完整 ABBA profile、算子分析和 gap 闭合全部保留，并额外从完整 trace 无损
+拆出：
+
+- `native_trace_view.json`：Native 的两轮 timeline；
+- `pypto_trace_view.json`：PyPTO 的两轮外层 timeline；
+- `split_trace_view.py`：确定性拆分脚本。
+
+这两份文件仍属于 device 0 的全面 Native/PyPTO 对比证据，不冒充内部 child-task
+timeline。
+
+### 95.1 为什么单独走 L2 DFX
+
+第 69.9 节已经确认，borrowed-device L1 初始化会强制关闭 Simpler DFX，不能在待 capture
+的单算子 launch 中打开 chip-swimlane。为了不修改 PyPTO/simpler 产品代码、不污染 L1
+ACLGraph 调度语义，本轮新增独立上板入口 `a3_child_swimlane.py`：
+
+1. 编译当前最终 `DecodeCSAProgramSpec(batch=4)` TRB program；
+2. 使用与生产一致的 B4/S8/C8191 shape、scalar 和 page metadata；
+3. tensor fixture 放在 CPU，遵守 PyPTO L2 runner 自己分配 device memory、H2D、执行和
+   D2H copy-back 的既有契约；
+4. 在 device 1 上先由 fresh subprocess 采集 dependency graph，再执行 clean timing
+   chip-swimlane pass；
+5. 校验全零输入的输出仍为全零；
+6. 用 Simpler converter 生成逐核 Perfetto JSON。
+
+device 0 当时有另一个 SGLang 进程占用，未触碰该进程；device 1 可用，因此本轮只使用
+device 1。执行环境明确为仓库 `.venv` 中的 torch 2.12/torch_npu 2.12，而不是系统中的
+其他 Python 环境。
+
+### 95.2 产物与实测结构
+
+产物归档到：
+
+`tests/pypto_dsv4_decode_csa/results/20260903_device1_pypto_child_swimlane/`。
+
+主文件 `pypto_child_task_swimlane.json` 可直接拖入 Perfetto。核验结果为：
+
+- `Worker View` 有 `AIC_0…AIC_19` 和 `AIV_20…AIV_59`，60 个物理核全部有 task；
+- 834 个 child task，其中 AIC 369 个、AIV 465 个；每核 10–21 个；
+- 同时包含 834 条 AICPU task 记录、4 个 scheduler phase 和 1 个 orchestrator phase；
+- `Scheduler View`、4 条 AICPU scheduler lane、Orchestrator lane 和 flow/dependency 关系
+  均被保留；
+- `deps.json` 包含 62 个结构 task、220 条依赖边和 103 个 tensor；
+- function name map 覆盖 41 个 callable；
+- 最终融合的 `idx_qr_dequant_rope` 有 64 个 task，旧的 `idx_qr_proj_dequant` 与独立
+  `qr_rope` 均为 0，证明采集来自当前最终 program 而非第 69 节的旧图。
+
+原始 `chip_swimlane_records.json`、`deps.json` 和稳定命名的 `name_map.json` 一并归档，
+没有生成文件摘要清单。
+
+### 95.3 口径限制
+
+该逐核 JSON回答的是“PyPTO 当前 task DAG 在 A3 各物理 AICore 上怎样执行”。它复用了
+最终 L1 的 TRB callable 和参数契约，但承载方式是独立 L2 DFX run，所以：
+
+- 可以用于 child task placement、并发度、依赖、head/tail overhead 和 scheduler gap
+  分析；
+- 不把 L2 的绝对总时延、host bind/copy 或 DFX 开销写成 L1 ACLGraph 性能；
+- 不把 device 1 的逐核时间与 device 0 历史 ABBA profile 直接相减；
+- L1 的绝对性能结论仍以无 DFX 的 steady-state ACLGraph benchmark 为准；
+- 若未来必须得到“某一次 L1 replay 自身”的逐核时间线，需要另行设计低开销、可关闭且
+  不跨越单算子边界的 L1 child DFX ABI。

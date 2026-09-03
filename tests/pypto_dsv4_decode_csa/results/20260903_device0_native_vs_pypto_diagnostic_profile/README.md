@@ -8,8 +8,10 @@ context position 8191、ratio4，并在同一个 fresh process 中按 ABBA 顺�
 
 - `operator_comparison_analysis.md`：Native/PyPTO 算子、双流 overlap、AICPU/AICore
   envelope 和最终差距的完整闭合分析，应当先读这一份。
-- `pypto_device_swimlane.svg`：PyPTO 两轮 replay 的等比例 device 泳道图。
-- `generate_pypto_swimlane.py`：从原始 `task_time.csv` 确定性重建该图。
+- `native_trace_view.json`：从完整 ABBA timeline 拆出的两轮 Native Perfetto JSON。
+- `pypto_trace_view.json`：从完整 ABBA timeline 拆出的两轮 PyPTO 外层 Perfetto JSON；
+  可见 AICPU scheduler 与 `aicore_kernel_0`，不伪装成 child-task 泳道。
+- `split_trace_view.py`：从原始完整 trace 确定性重建上述两份派生 JSON。
 - `native_operator_breakdown.csv`：Native 38 个可见算子的逐项耗时。
 - `gap_decomposition.csv`：两轮 MODEL 差距的机器可读闭合数据。
 - `profiler_output/trace_view.json`：完整时间线，可直接用于 timeline 分析。
@@ -20,6 +22,10 @@ context position 8191、ratio4，并在同一个 fresh process 中按 ABBA 顺�
 - `profiler_output/analysis.db`：CANN 分析数据库。
 - `benchmark_run.txt`：产生本轮 profile 的完整运行日志，含 benchmark 配置、正确性门禁和
   正式性能样本。
+
+真正按物理 AIC/AIV 核展开 PyPTO 内部 child task 的 JSON 位于同级
+`../20260903_device1_pypto_child_swimlane/pypto_child_task_swimlane.json`。该文件使用当前
+最终源码在 device 1 上独立采集；本目录的全面外层对比 profiling 原样保留。
 原始 CANN CSV 使用 CRLF 行尾；本目录通过局部 `.gitattributes` 将它们标记为
 binary，以确保 Git 不转换原始字节，也不产生无意义的逐行 diff。
 

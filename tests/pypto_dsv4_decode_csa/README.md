@@ -446,11 +446,18 @@ Native 与 PyPTO 同轮采集的一套完整诊断 profiler 产物已汇聚到
 `results/20260903_device0_native_vs_pypto_diagnostic_profile/`。其中
 `operator_comparison_analysis.md` 给出算子级热点、双流 overlap 和 AICPU/AICore
 envelope 的完整差距闭合，
-`pypto_device_swimlane.svg` 给出 PyPTO 两轮 replay 的等比例 device 泳道，
-`profiler_output/trace_view.json` 是 timeline 主入口，
+`native_trace_view.json` 与 `pypto_trace_view.json` 是从完整 ABBA trace 无损拆出的两份
+Perfetto JSON，`profiler_output/trace_view.json` 保留完整 timeline，
 `profiler_output/kernel_details.csv` 用于 kernel 级拆分，目录内 README 记录测试口径和
 原始位置。该 profile 产生于最终三项优化之前，只能作为历史瓶颈归因证据；最终正式
 性能结论仍以 `results/20260903_device0_trb_steady_state_performance.json` 为准。
+
+PyPTO 内部每个 child task 按物理 AIC/AIV 核展开的真正细粒度泳道位于
+`results/20260903_device1_pypto_child_swimlane/pypto_child_task_swimlane.json`，可直接拖入
+Perfetto。它包含全部 60 个 AICore 上的 834 个 child task，以及 Scheduler 和
+Orchestrator 视图。由于 borrowed-device L1 禁止 DFX，该文件由同一最终 TRB callable
+在独立 L2 diagnostic run 中采集，只用于 task 排布、依赖和 scheduler-gap 分析，不作为
+L1 绝对性能结论。
 
 ### 6.4 短上下文 device gate 与 top-k 语义边界
 
