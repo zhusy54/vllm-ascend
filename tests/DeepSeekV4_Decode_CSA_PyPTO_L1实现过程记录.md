@@ -5630,8 +5630,7 @@ Qwen3 文件，也没有把这两个外部阻断写成“本任务 lint 失败�
 `tests/pypto_dsv4_decode_csa/results/20260903_device0_native_vs_pypto_diagnostic_profile/`。
 
 目录包含 `trace_view.json`、`kernel_details.csv`、`task_time.csv`、operator/API 表、两份
-SQLite 数据库、运行日志、原始文件 `SHA256SUMS` 和口径 README。所有 11 个原始文件的
-SHA256 均与 `/tmp` 来源逐一一致；CANN CSV 原样保留 CRLF，并通过目录局部
+SQLite 数据库、运行日志和口径 README。CANN CSV 原样保留 CRLF，并通过目录局部
 `.gitattributes` 标为 binary，避免 Git 转换原始字节。该归档阶段提交为 `cfa92e5`，没有
 push。
 
@@ -5662,8 +5661,8 @@ MODEL gap = AICore gap + AICPU envelope increment + outer residual
 每轮图包含 stream 44 的 `MODEL_EXECUTE/MODEL_WAIT_COMPLETE`、stream 10 的两次
 `MEMCPY_ASYNC` 与 `simpler_aicpu_l1_exec_*`、stream 9 的 `aicore_kernel_0`，并标出
 AICPU 相对 AICore 的 lead 和 completion tail。时间戳先用 `Decimal` 做巨大绝对值消减，
-再映射到像素，避免 binary float 导致约 `0.03–0.05 us` 的伪误差。生成器重复运行后
-SVG 哈希不变，XML、关键数值标签、Ruff、Markdown 和 `git diff --check` 均做门禁。
+再映射到像素，避免 binary float 导致约 `0.03–0.05 us` 的伪误差。生成器重复运行结果
+字节一致，XML、关键数值标签、Ruff、Markdown 和 `git diff --check` 均做门禁。
 
 图中没有伪造 PyPTO child 泳道：当前 CANN profiler 只暴露外层 AICPU scheduler 与
 `aicore_kernel_0`，不能看到其内部 child 的真实 start/end。若未来为 borrowed-device L1

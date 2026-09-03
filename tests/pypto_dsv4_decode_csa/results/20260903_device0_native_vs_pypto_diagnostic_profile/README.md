@@ -20,8 +20,6 @@ context position 8191、ratio4，并在同一个 fresh process 中按 ABBA 顺�
 - `profiler_output/analysis.db`：CANN 分析数据库。
 - `benchmark_run.txt`：产生本轮 profile 的完整运行日志，含 benchmark 配置、正确性门禁和
   正式性能样本。
-- `SHA256SUMS`：从 `/tmp` 汇聚时记录的原始文件哈希。
-
 原始 CANN CSV 使用 CRLF 行尾；本目录通过局部 `.gitattributes` 将它们标记为
 binary，以确保 Git 不转换原始字节，也不产生无意义的逐行 diff。
 

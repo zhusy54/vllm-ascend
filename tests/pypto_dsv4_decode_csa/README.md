@@ -448,8 +448,8 @@ Native 与 PyPTO 同轮采集的一套完整诊断 profiler 产物已汇聚到
 envelope 的完整差距闭合，
 `pypto_device_swimlane.svg` 给出 PyPTO 两轮 replay 的等比例 device 泳道，
 `profiler_output/trace_view.json` 是 timeline 主入口，
-`profiler_output/kernel_details.csv` 用于 kernel 级拆分，目录内 README 记录测试口径、
-原始位置和哈希。该 profile 产生于最终三项优化之前，只能作为历史瓶颈归因证据；最终正式
+`profiler_output/kernel_details.csv` 用于 kernel 级拆分，目录内 README 记录测试口径和
+原始位置。该 profile 产生于最终三项优化之前，只能作为历史瓶颈归因证据；最终正式
 性能结论仍以 `results/20260903_device0_trb_steady_state_performance.json` 为准。
 
 ### 6.4 短上下文 device gate 与 top-k 语义边界
