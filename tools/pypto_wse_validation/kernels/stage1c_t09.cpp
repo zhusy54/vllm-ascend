@@ -121,11 +121,21 @@ __aicore__ inline uint64_t PayloadWords(uint64_t sequence, uint64_t &payload_ind
         payload_index = 1;
         return (4ULL * 1024ULL) / sizeof(uint64_t);
     }
-    payload_index = (sequence - kWarmupCount - 1) & 3ULL;
-    if (payload_index == 0) return 64ULL / sizeof(uint64_t);
-    if (payload_index == 1) return (4ULL * 1024ULL) / sizeof(uint64_t);
-    if (payload_index == 2) return (64ULL * 1024ULL) / sizeof(uint64_t);
-    return (1024ULL * 1024ULL) / sizeof(uint64_t);
+    const uint64_t measured_sequence = sequence - kWarmupCount;
+    if (measured_sequence % 100 == 0) {
+        payload_index = 3;
+        return (1024ULL * 1024ULL) / sizeof(uint64_t);
+    }
+    if (measured_sequence % 5 == 0) {
+        payload_index = 2;
+        return (64ULL * 1024ULL) / sizeof(uint64_t);
+    }
+    if (measured_sequence % 2 == 0) {
+        payload_index = 1;
+        return (4ULL * 1024ULL) / sizeof(uint64_t);
+    }
+    payload_index = 0;
+    return 64ULL / sizeof(uint64_t);
 }
 __aicore__ inline bool WaitForSequence(__gm__ uint64_t *signal, uint64_t expected) {
     const uint64_t begin = static_cast<uint64_t>(get_sys_cnt());

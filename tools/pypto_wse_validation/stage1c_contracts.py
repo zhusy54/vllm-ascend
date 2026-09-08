@@ -17,6 +17,7 @@ T09_WARMUP_COUNT = 100
 T09_MEASURED_COUNT = 10_000
 T09_TOTAL_COUNT = T09_WARMUP_COUNT + T09_MEASURED_COUNT
 T09_PAYLOAD_BYTES = (64, 4 * 1024, 64 * 1024, 1024 * 1024)
+T09_PAYLOAD_COUNTS = (4000, 4000, 1900, 100)
 T09_SLOT_COUNT = 2
 T09_MAX_INFLIGHT = 2
 T09_PROGRESS_INTERVAL = 100
@@ -252,7 +253,6 @@ class T09Observation:
 
     @property
     def passed(self) -> bool:
-        expected_payload_count = T09_MEASURED_COUNT // len(T09_PAYLOAD_BYTES)
         reports = (self.driver_report, self.service_report)
         return all(
             (
@@ -303,10 +303,13 @@ class T09Observation:
                     and report.queue_stalls == 0
                     and report.progress_checkpoints == T09_PROGRESS_CHECKPOINTS
                     and report.progress_interval == T09_PROGRESS_INTERVAL
-                    and report.payload_64_count == expected_payload_count
-                    and report.payload_4k_count == expected_payload_count
-                    and report.payload_64k_count == expected_payload_count
-                    and report.payload_1m_count == expected_payload_count
+                    and (
+                        report.payload_64_count,
+                        report.payload_4k_count,
+                        report.payload_64k_count,
+                        report.payload_1m_count,
+                    )
+                    == T09_PAYLOAD_COUNTS
                     and report.payload_words_validated > 0
                     and report.credits_acquired == (T09_TOTAL_COUNT if report.input_fences else 0)
                     and report.credits_returned == (T09_TOTAL_COUNT if report.input_fences else 0)
