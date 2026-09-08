@@ -74,16 +74,34 @@ from tools.pypto_wse_validation.stage1b_contracts import (
     T05_SERVICE_KERNEL,
     T05_SLOT_COUNT,
     T05_WINDOW_BYTES,
+    T06_BACKPRESSURE_WAIT,
+    T06_CASE_ID,
+    T06_CONTROL_OFFSET,
+    T06_DEVICE_CONTEXT,
+    T06_DRIVER_KERNEL,
+    T06_INPUT_FENCE,
+    T06_MAX_INFLIGHT,
+    T06_OUTPUT_FENCE,
+    T06_PAYLOAD_BYTES,
+    T06_SEQUENCE_COUNT,
+    T06_SERVICE_KERNEL,
+    T06_SLOT_COUNT,
+    T06_THIRD_REQUEST_OUTCOME,
+    T06_WINDOW_BYTES,
     DeviceLoopReport,
     T04Observation,
     T05DeviceLoopReport,
     T05Observation,
+    T06DeviceLoopReport,
+    T06Observation,
 )
 
 T04_DRIVER_BINARY = "stage1b_t04_driver.o"
 T04_SERVICE_BINARY = "stage1b_t04_service.o"
 T05_DRIVER_BINARY = "stage1b_t05_driver.o"
 T05_SERVICE_BINARY = "stage1b_t05_service.o"
+T06_DRIVER_BINARY = "stage1b_t06_driver.o"
+T06_SERVICE_BINARY = "stage1b_t06_service.o"
 
 
 @dataclass(frozen=True)
@@ -123,6 +141,18 @@ def _case_spec(case_id: str) -> _CaseSpec:
             service_kernel=T05_SERVICE_KERNEL,
             report_offset=T05_SLOT_COUNT * 2 * 64,
             report_bytes=T05DeviceLoopReport._STRUCT.size,
+        )
+    if case_id == T06_CASE_ID:
+        return _CaseSpec(
+            case_id=T06_CASE_ID,
+            control_offset=T06_CONTROL_OFFSET,
+            window_bytes=T06_WINDOW_BYTES,
+            driver_binary=T06_DRIVER_BINARY,
+            service_binary=T06_SERVICE_BINARY,
+            driver_kernel=T06_DRIVER_KERNEL,
+            service_kernel=T06_SERVICE_KERNEL,
+            report_offset=(T06_SLOT_COUNT * 2 * 64) + 64,
+            report_bytes=T06DeviceLoopReport._STRUCT.size,
         )
     raise ValueError(f"unsupported Stage 1B case: {case_id}")
 
@@ -179,6 +209,35 @@ def _t05_kernel_arguments(role: EndpointRole, local_address: int, peer_address: 
     )
 
 
+def _t06_kernel_arguments(role: EndpointRole, local_address: int, peer_address: int, generation: int):
+    del role  # Both role-specific binaries consume the same address ordering.
+    return _T04KernelArguments(
+        local_payload=local_address,
+        local_control=local_address + T06_CONTROL_OFFSET,
+        remote_payload=peer_address,
+        remote_control=peer_address + T06_CONTROL_OFFSET,
+        generation=generation,
+        payload_words=T06_PAYLOAD_BYTES // ctypes.sizeof(ctypes.c_uint64),
+        sequence_count=T06_SEQUENCE_COUNT,
+    )
+
+
+def _kernel_arguments_for_case(case_id: str):
+    if case_id == T04_CASE_ID:
+        return _kernel_arguments
+    if case_id == T05_CASE_ID:
+        return _t05_kernel_arguments
+    return _t06_kernel_arguments
+
+
+def _report_type_for_case(case_id: str):
+    if case_id == T04_CASE_ID:
+        return DeviceLoopReport
+    if case_id == T05_CASE_ID:
+        return T05DeviceLoopReport
+    return T06DeviceLoopReport
+
+
 def _counter_delta(after: Mapping[str, Any], before: Mapping[str, Any], key: str) -> int:
     return int(after.get(key, 0)) - int(before.get(key, 0))
 
@@ -197,7 +256,7 @@ def run_endpoint(args: argparse.Namespace) -> int:
     peer_window: Any | None = None
     kernel: AclDeviceKernel | None = None
     channel: ControlChannel | None = None
-    report: DeviceLoopReport | T05DeviceLoopReport | None = None
+    report: DeviceLoopReport | T05DeviceLoopReport | T06DeviceLoopReport | None = None
     kernel_elapsed_ns = 0
     hot_path: dict[str, int] = {
         "control_bytes": 0,
@@ -247,7 +306,7 @@ def run_endpoint(args: argparse.Namespace) -> int:
             binary_name = case.driver_binary if role is EndpointRole.ATTENTION else case.service_binary
             kernel = AclDeviceKernel(runtime, args.kernel_dir / binary_name)
             cleanup["device_kernel"] = "OPEN"
-            kernel_arguments = _kernel_arguments if case.case_id == T04_CASE_ID else _t05_kernel_arguments
+            kernel_arguments = _kernel_arguments_for_case(case.case_id)
             kernel.launch(kernel_arguments(role, local_window.address, peer_window.address, args.generation))
             protocol.exchange("READY", {"case_id": case.case_id, "device_kernel_launched": True})
             hot_path_start = channel.evidence()
@@ -259,7 +318,7 @@ def run_endpoint(args: argparse.Namespace) -> int:
                 local_window.address + case.control_offset + case.report_offset,
                 case.report_bytes,
             )
-            report_type = DeviceLoopReport if case.case_id == T04_CASE_ID else T05DeviceLoopReport
+            report_type = _report_type_for_case(case.case_id)
             report = report_type.from_bytes(raw_report)
             kernel.close()
             cleanup["device_kernel"] = "CLOSED"
@@ -362,17 +421,19 @@ def _endpoint_command(role: EndpointRole, device_id: int, access_device_id: int,
     ]
 
 
-def _report_from_artifact(artifact: Mapping[str, Any], case_id: str) -> DeviceLoopReport | T05DeviceLoopReport:
+def _report_from_artifact(
+    artifact: Mapping[str, Any], case_id: str
+) -> DeviceLoopReport | T05DeviceLoopReport | T06DeviceLoopReport:
     raw = artifact.get("device_loop", {}).get("report")
     if not isinstance(raw, Mapping):
         raise ValueError(f"endpoint is missing a {case_id} device report")
-    report_type = DeviceLoopReport if case_id == T04_CASE_ID else T05DeviceLoopReport
+    report_type = _report_type_for_case(case_id)
     return report_type(**raw)
 
 
 def _observation_from_artifacts(
     args: argparse.Namespace, artifacts: Mapping[EndpointRole, Mapping[str, Any]]
-) -> T04Observation | T05Observation:
+) -> T04Observation | T05Observation | T06Observation:
     case_id = getattr(args, "case_id", T04_CASE_ID)
     attention_loop = artifacts[EndpointRole.ATTENTION]["device_loop"]
     service_loop = artifacts[EndpointRole.WSE_SURROGATE]["device_loop"]
@@ -421,21 +482,47 @@ def _observation_from_artifacts(
             output_fence=T04_OUTPUT_FENCE,
             **common,
         )
-    if not isinstance(driver_report, T05DeviceLoopReport) or not isinstance(service_report, T05DeviceLoopReport):
-        raise ValueError("T05 artifacts contain the wrong report type")
-    return T05Observation(
-        slot_count=T05_SLOT_COUNT,
-        max_inflight=T05_MAX_INFLIGHT,
-        sequence_count=T05_SEQUENCE_COUNT,
-        payload_bytes=T05_PAYLOAD_BYTES,
-        driver_context=T05_DEVICE_CONTEXT,
-        service_context=T05_DEVICE_CONTEXT,
-        credits_acquired=driver_report.credits_acquired,
+    if case_id == T05_CASE_ID:
+        if not isinstance(driver_report, T05DeviceLoopReport) or not isinstance(service_report, T05DeviceLoopReport):
+            raise ValueError("T05 artifacts contain the wrong report type")
+        return T05Observation(
+            slot_count=T05_SLOT_COUNT,
+            max_inflight=T05_MAX_INFLIGHT,
+            sequence_count=T05_SEQUENCE_COUNT,
+            payload_bytes=T05_PAYLOAD_BYTES,
+            driver_context=T05_DEVICE_CONTEXT,
+            service_context=T05_DEVICE_CONTEXT,
+            credits_acquired=driver_report.credits_acquired,
+            terminal_tasks=driver_report.terminal_tasks,
+            credits_returned=driver_report.credits_returned,
+            out_of_order_completions=driver_report.out_of_order_completions,
+            input_fence=T05_INPUT_FENCE,
+            output_fence=T05_OUTPUT_FENCE,
+            **common,
+        )
+    if not isinstance(driver_report, T06DeviceLoopReport) or not isinstance(service_report, T06DeviceLoopReport):
+        raise ValueError("T06 artifacts contain the wrong report type")
+    return T06Observation(
+        slot_count=T06_SLOT_COUNT,
+        max_inflight=T06_MAX_INFLIGHT,
+        sequence_count=T06_SEQUENCE_COUNT,
+        payload_bytes=T06_PAYLOAD_BYTES,
+        attempted_submissions=driver_report.submissions + driver_report.no_credit_events,
+        no_credit_events=driver_report.no_credit_events,
+        pending_requests=driver_report.pending_requests,
         terminal_tasks=driver_report.terminal_tasks,
+        credits_acquired=driver_report.credits_acquired,
         credits_returned=driver_report.credits_returned,
-        out_of_order_completions=driver_report.out_of_order_completions,
-        input_fence=T05_INPUT_FENCE,
-        output_fence=T05_OUTPUT_FENCE,
+        submission_retry_spins=driver_report.submission_retry_spins,
+        service_pause_observed=bool(driver_report.service_pause_observed and service_report.service_pause_observed),
+        service_resume_observed=bool(driver_report.service_resume_observed and service_report.service_resume_observed),
+        progress_after_resume=min(driver_report.progress_after_resume, service_report.progress_after_resume),
+        third_request_outcome=T06_THIRD_REQUEST_OUTCOME,
+        backpressure_wait=T06_BACKPRESSURE_WAIT,
+        driver_context=T06_DEVICE_CONTEXT,
+        service_context=T06_DEVICE_CONTEXT,
+        input_fence=T06_INPUT_FENCE,
+        output_fence=T06_OUTPUT_FENCE,
         **common,
     )
 
@@ -473,18 +560,24 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
             "success": endpoint_success,
         }
 
-    observation: T04Observation | T05Observation | None = None
+    observation: T04Observation | T05Observation | T06Observation | None = None
     with suppress(KeyError, TypeError, ValueError):
         observation = _observation_from_artifacts(args, artifacts)
 
     case_passed = bool(
         all_success and all_cleanup and all(driver_proofs) and observation is not None and observation.passed
     )
-    sequence_count = T04_SEQUENCE_COUNT if case_id == T04_CASE_ID else T05_SEQUENCE_COUNT
-    transferred_bytes = (
-        T04_SEQUENCE_COUNT * T04_PAYLOAD_BYTES * 2
-        if case_id == T04_CASE_ID
-        else (T05_SEQUENCE_COUNT // T05_SLOT_COUNT) * sum(T05_PAYLOAD_BYTES) * 2
+    if case_id == T04_CASE_ID:
+        sequence_count = T04_SEQUENCE_COUNT
+        transferred_bytes = T04_SEQUENCE_COUNT * T04_PAYLOAD_BYTES * 2
+    elif case_id == T05_CASE_ID:
+        sequence_count = T05_SEQUENCE_COUNT
+        transferred_bytes = (T05_SEQUENCE_COUNT // T05_SLOT_COUNT) * sum(T05_PAYLOAD_BYTES) * 2
+    else:
+        sequence_count = T06_SEQUENCE_COUNT
+        transferred_bytes = T06_SEQUENCE_COUNT * T06_PAYLOAD_BYTES * 2
+    attempted_submissions = (
+        observation.attempted_submissions if isinstance(observation, T06Observation) else sequence_count
     )
     return {
         "actual_backend": STAGE1A_BACKEND,
@@ -494,7 +587,7 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
         "c2_status": "NOT_ESTABLISHED",
         "data_results": {
             case_id: {
-                "attempts": sequence_count,
+                "attempts": attempted_submissions,
                 "bytes": transferred_bytes,
                 "passed": observation.validated_sequences if observation is not None else 0,
                 "status": "PASS" if case_passed else "FAIL",
@@ -595,7 +688,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--kernel-dir", type=Path, required=True)
     run.add_argument("--host", default="127.0.0.1")
     run.add_argument("--run-id", default=f"stage1b-{uuid.uuid4().hex}")
-    run.add_argument("--case-id", choices=(T04_CASE_ID, T05_CASE_ID), default=T04_CASE_ID)
+    run.add_argument("--case-id", choices=(T04_CASE_ID, T05_CASE_ID, T06_CASE_ID), default=T04_CASE_ID)
     run.add_argument("--generation", type=int, default=DEFAULT_GENERATION)
     run.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     run.add_argument("--start-delay", type=float, default=DEFAULT_START_DELAY_SECONDS)
@@ -610,7 +703,7 @@ def build_parser() -> argparse.ArgumentParser:
     endpoint.add_argument("--host", required=True)
     endpoint.add_argument("--port", type=int, required=True)
     endpoint.add_argument("--run-id", required=True)
-    endpoint.add_argument("--case-id", choices=(T04_CASE_ID, T05_CASE_ID), required=True)
+    endpoint.add_argument("--case-id", choices=(T04_CASE_ID, T05_CASE_ID, T06_CASE_ID), required=True)
     endpoint.add_argument("--generation", type=int, required=True)
     endpoint.add_argument("--timeout", type=float, required=True)
     return parser
