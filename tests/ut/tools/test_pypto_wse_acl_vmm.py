@@ -13,6 +13,7 @@ from tools.pypto_wse_validation.acl_vmm import (
     ACL_MEMCPY_HOST_TO_DEVICE,
     VALIDATION_P2P_CHUNK_BYTES,
     AclError,
+    AclnnXorTransform,
     AclVmmRuntime,
     VmmExport,
     _AclMemAccessDesc,
@@ -42,6 +43,10 @@ class _FakeFunction:
             ctypes.cast(args[3], ctypes.POINTER(ctypes.c_uint64))[0] = 0xABC
         elif self.name == "aclrtMemImportFromShareableHandle":
             ctypes.cast(args[2], ctypes.POINTER(ctypes.c_void_p))[0] = 0x2000
+        elif self.name == "aclrtCreateStream":
+            ctypes.cast(args[0], ctypes.POINTER(ctypes.c_void_p))[0] = 0x4000
+        elif self.name == "aclrtMalloc":
+            ctypes.cast(args[0], ctypes.POINTER(ctypes.c_void_p))[0] = 0x5000
         return self.owner.results.get(self.name, 0)
 
 
@@ -64,6 +69,11 @@ class _FakeAcl:
         "aclrtMemExportToShareableHandle",
         "aclrtMemImportFromShareableHandle",
         "aclrtMemcpy",
+        "aclrtCreateStream",
+        "aclrtDestroyStream",
+        "aclrtSynchronizeStream",
+        "aclrtMalloc",
+        "aclrtFree",
     )
 
     def __init__(self):
@@ -72,6 +82,42 @@ class _FakeAcl:
         self.next_address = 0x3000
         for name in self._FUNCTIONS:
             setattr(self, name, _FakeFunction(name, self))
+
+
+class _FakeOpFunction:
+    def __init__(self, name, owner):
+        self.name = name
+        self.owner = owner
+        self.argtypes = None
+        self.restype = None
+
+    def __call__(self, *args):
+        self.owner.calls.append((self.name, args))
+        if self.name == "aclCreateTensor":
+            return 0x6000
+        if self.name == "aclCreateScalar":
+            return 0x7000
+        if self.name == "aclnnInplaceBitwiseXorScalarGetWorkspaceSize":
+            ctypes.cast(args[2], ctypes.POINTER(ctypes.c_uint64))[0] = 4096
+            ctypes.cast(args[3], ctypes.POINTER(ctypes.c_void_p))[0] = 0x8000
+        return self.owner.results.get(self.name, 0)
+
+
+class _FakeOpApi:
+    _FUNCTIONS = (
+        "aclCreateTensor",
+        "aclCreateScalar",
+        "aclDestroyTensor",
+        "aclDestroyScalar",
+        "aclnnInplaceBitwiseXorScalarGetWorkspaceSize",
+        "aclnnInplaceBitwiseXorScalar",
+    )
+
+    def __init__(self):
+        self.calls = []
+        self.results = {}
+        for name in self._FUNCTIONS:
+            setattr(self, name, _FakeOpFunction(name, self))
 
 
 def _runtime() -> tuple[AclVmmRuntime, _FakeAcl]:
@@ -132,6 +178,27 @@ def test_large_p2p_copy_is_split_into_validated_chunks():
     assert all(args[1] == VALIDATION_P2P_CHUNK_BYTES for args in copies)
     assert copies[-1][0] == 0x200000 + 15 * VALIDATION_P2P_CHUNK_BYTES
     assert copies[-1][2] == 0x100000 + 15 * VALIDATION_P2P_CHUNK_BYTES
+    runtime.close()
+
+
+def test_aclnn_xor_runs_inplace_on_vmm_address_and_releases_temporaries():
+    runtime, library = _runtime()
+    op_library = _FakeOpApi()
+    transform = AclnnXorTransform(runtime, op_library=op_library)
+    evidence = transform.apply(0x300000, 65536, 7)
+    assert evidence.api == "aclnnInplaceBitwiseXorScalar"
+    assert evidence.workspace_bytes == 4096
+    tensor_args = next(args for name, args in op_library.calls if name == "aclCreateTensor")
+    assert tensor_args[8] == 0x300000
+    assert any(name == "aclnnInplaceBitwiseXorScalar" for name, _ in op_library.calls)
+    assert [name for name, _ in library.calls if name in {"aclrtFree", "aclrtDestroyStream"}] == [
+        "aclrtFree",
+        "aclrtDestroyStream",
+    ]
+    assert [name for name, _ in op_library.calls if name.startswith("aclDestroy")] == [
+        "aclDestroyScalar",
+        "aclDestroyTensor",
+    ]
     runtime.close()
 
 

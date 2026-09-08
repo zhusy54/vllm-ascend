@@ -18,6 +18,8 @@ STAGE1A_HANDLE_KIND = "ACL_VMM_SHAREABLE_HANDLE"
 STAGE1A_TRANSFER_API = "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE"
 STAGE1A_FENCE_API = "blocking_aclrtMemcpy_completion"
 VALIDATION_P2P_CHUNK_BYTES = 64 * 1024
+ROUND_TRIP_CASE_ID = "T03"
+ROUND_TRIP_TRANSFORM_API = "aclnnInplaceBitwiseXorScalar"
 
 
 class TransferDirection(str, Enum):
@@ -55,6 +57,13 @@ def deterministic_payload(run_id: str, generation: int, sequence_id: int, size: 
 
 def payload_checksum(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def transform_payload(payload: bytes, sequence_id: int) -> bytes:
+    if sequence_id < 1:
+        raise ContractError("sequence_id must be positive")
+    xor_value = sequence_id & 0xFF
+    return bytes(value ^ xor_value for value in payload)
 
 
 def opaque_handle_evidence(handle: int) -> dict[str, str]:
@@ -160,4 +169,129 @@ class TransferObservation:
 def stage1a_matrix_complete(observations: tuple[TransferObservation, ...]) -> bool:
     expected = {(direction, payload_bytes) for direction in TransferDirection for payload_bytes in BASE_PAYLOAD_SIZES}
     observed = {(item.direction, item.payload_bytes) for item in observations if item.passed}
+    return len(observations) == len(expected) and observed == expected
+
+
+@dataclass(frozen=True)
+class RoundTripObservation:
+    case_id: str
+    payload_bytes: int
+    sequence_id: int
+    source_memory: MemoryKind
+    transform_memory: MemoryKind
+    destination_memory: MemoryKind
+    backend: str
+    transport_scope: TransportScope
+    handle_kind: str
+    transfer_api: str
+    visibility_fence: str
+    transform_api: str
+    transform_value: int
+    input_checksum: str
+    expected_output_checksum: str
+    observed_output_checksum: str
+    host_bounce_bytes: int
+    host_intermediate_payload_bytes: int
+    host_source_staging_bytes: int
+    host_final_verification_bytes: int
+    fallback_used: bool
+    transform_device_side: bool
+    forward_transfer_chunks: int
+    return_transfer_chunks: int
+    max_transfer_chunk_bytes: int
+    forward_elapsed_ns: int
+    transform_elapsed_ns: int
+    return_elapsed_ns: int
+    round_trip_elapsed_ns: int
+    transform_workspace_bytes: int
+
+    def validate(self) -> None:
+        if self.case_id != ROUND_TRIP_CASE_ID:
+            raise ContractError(f"round-trip case_id must be {ROUND_TRIP_CASE_ID}")
+        if self.payload_bytes not in BASE_PAYLOAD_SIZES:
+            raise ContractError(f"unsupported stage-1A payload size: {self.payload_bytes}")
+        if self.sequence_id < 1:
+            raise ContractError("sequence_id must be positive")
+        if self.transform_value != self.sequence_id & 0xFF:
+            raise ContractError("transform value must equal LOW8(sequence_id)")
+        checksums = (self.input_checksum, self.expected_output_checksum, self.observed_output_checksum)
+        if any(len(value) != 64 for value in checksums):
+            raise ContractError("round-trip checksums must be SHA-256 hex digests")
+        byte_counters = (
+            self.host_bounce_bytes,
+            self.host_intermediate_payload_bytes,
+            self.host_source_staging_bytes,
+            self.host_final_verification_bytes,
+            self.transform_workspace_bytes,
+        )
+        if min(byte_counters) < 0:
+            raise ContractError("round-trip byte counters must be non-negative")
+        elapsed = (
+            self.forward_elapsed_ns,
+            self.transform_elapsed_ns,
+            self.return_elapsed_ns,
+            self.round_trip_elapsed_ns,
+        )
+        if min(elapsed) < 0:
+            raise ContractError("round-trip elapsed counters must be non-negative")
+
+    @property
+    def passed(self) -> bool:
+        self.validate()
+        chunks = (self.payload_bytes + VALIDATION_P2P_CHUNK_BYTES - 1) // VALIDATION_P2P_CHUNK_BYTES
+        return all(
+            (
+                self.source_memory is MemoryKind.DEVICE,
+                self.transform_memory is MemoryKind.DEVICE,
+                self.destination_memory is MemoryKind.DEVICE,
+                self.backend == STAGE1A_BACKEND,
+                self.transport_scope is TransportScope.HOST_LOCAL,
+                self.handle_kind == STAGE1A_HANDLE_KIND,
+                self.transfer_api == STAGE1A_TRANSFER_API,
+                self.visibility_fence == STAGE1A_FENCE_API,
+                self.transform_api == ROUND_TRIP_TRANSFORM_API,
+                self.expected_output_checksum == self.observed_output_checksum,
+                self.host_bounce_bytes == 0,
+                self.host_intermediate_payload_bytes == 0,
+                self.host_source_staging_bytes == self.payload_bytes,
+                self.host_final_verification_bytes == self.payload_bytes,
+                not self.fallback_used,
+                self.transform_device_side,
+                self.forward_transfer_chunks == chunks,
+                self.return_transfer_chunks == chunks,
+                self.max_transfer_chunk_bytes == min(self.payload_bytes, VALIDATION_P2P_CHUNK_BYTES),
+                self.round_trip_elapsed_ns
+                >= self.forward_elapsed_ns + self.transform_elapsed_ns + self.return_elapsed_ns,
+            )
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        self.validate()
+        result = asdict(self)
+        result["source_memory"] = self.source_memory.value
+        result["transform_memory"] = self.transform_memory.value
+        result["destination_memory"] = self.destination_memory.value
+        result["transport_scope"] = self.transport_scope.value
+        result["passed"] = self.passed
+        return result
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> RoundTripObservation:
+        data = dict(value)
+        data.pop("passed", None)
+        try:
+            data["source_memory"] = MemoryKind(data["source_memory"])
+            data["transform_memory"] = MemoryKind(data["transform_memory"])
+            data["destination_memory"] = MemoryKind(data["destination_memory"])
+            data["transport_scope"] = TransportScope(data["transport_scope"])
+            observation = cls(**data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ContractError(f"invalid round-trip observation: {exc}") from exc
+        observation.validate()
+        return observation
+
+
+def stage1a_round_trip_complete(observations: tuple[RoundTripObservation, ...]) -> bool:
+    expected = set(BASE_PAYLOAD_SIZES)
+    observed = {item.payload_bytes for item in observations if item.passed}
     return len(observations) == len(expected) and observed == expected

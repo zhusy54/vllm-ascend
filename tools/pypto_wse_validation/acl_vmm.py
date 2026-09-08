@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ctypes
 from dataclasses import dataclass
+from time import perf_counter_ns
 from typing import Any
 
 ACL_SUCCESS = 0
@@ -21,6 +22,9 @@ ACL_MEMCPY_HOST_TO_DEVICE = 1
 ACL_MEMCPY_DEVICE_TO_HOST = 2
 ACL_MEMCPY_DEVICE_TO_DEVICE = 3
 VALIDATION_P2P_CHUNK_BYTES = 64 * 1024
+ACL_MEM_MALLOC_HUGE_FIRST = 0
+ACL_UINT8 = 4
+ACL_FORMAT_ND = 2
 
 
 class AclError(RuntimeError):
@@ -67,6 +71,13 @@ class VmmExport:
     device_id: int
     mapping_bytes: int
     shareable_handle: int
+
+
+@dataclass(frozen=True)
+class DeviceTransformEvidence:
+    api: str
+    elapsed_ns: int
+    workspace_bytes: int
 
 
 class AclVmmRuntime:
@@ -400,3 +411,164 @@ class ImportedVmmWindow(_MappedWindow):
             runtime._library.aclrtFreePhysical(native_handle)
             raise
         return cls(runtime, address, native_handle, exported.mapping_bytes)
+
+
+class AclnnXorTransform:
+    """Launch an in-place UINT8 XOR directly on a local VMM window."""
+
+    API = "aclnnInplaceBitwiseXorScalar"
+
+    def __init__(self, runtime: AclVmmRuntime, *, op_library: Any | None = None) -> None:
+        runtime._require_initialized()
+        self.runtime = runtime
+        self._op_library = op_library if op_library is not None else self._load_op_library()
+        self._configure_signatures()
+
+    @staticmethod
+    def _load_op_library() -> Any:
+        try:
+            return ctypes.CDLL("libopapi.so", mode=ctypes.RTLD_GLOBAL)
+        except OSError as exc:
+            raise AclError(f"unable to load libopapi.so: {exc}") from exc
+
+    def _configure_signatures(self) -> None:
+        acl = self.runtime._library
+        acl.aclrtCreateStream.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
+        acl.aclrtCreateStream.restype = ctypes.c_int
+        acl.aclrtDestroyStream.argtypes = [ctypes.c_void_p]
+        acl.aclrtDestroyStream.restype = ctypes.c_int
+        acl.aclrtSynchronizeStream.argtypes = [ctypes.c_void_p]
+        acl.aclrtSynchronizeStream.restype = ctypes.c_int
+        acl.aclrtMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t, ctypes.c_int]
+        acl.aclrtMalloc.restype = ctypes.c_int
+        acl.aclrtFree.argtypes = [ctypes.c_void_p]
+        acl.aclrtFree.restype = ctypes.c_int
+
+        op = self._op_library
+        op.aclCreateTensor.argtypes = [
+            ctypes.POINTER(ctypes.c_int64),
+            ctypes.c_uint64,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int64),
+            ctypes.c_int64,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int64),
+            ctypes.c_uint64,
+            ctypes.c_void_p,
+        ]
+        op.aclCreateTensor.restype = ctypes.c_void_p
+        op.aclCreateScalar.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        op.aclCreateScalar.restype = ctypes.c_void_p
+        op.aclDestroyTensor.argtypes = [ctypes.c_void_p]
+        op.aclDestroyTensor.restype = ctypes.c_int
+        op.aclDestroyScalar.argtypes = [ctypes.c_void_p]
+        op.aclDestroyScalar.restype = ctypes.c_int
+        op.aclnnInplaceBitwiseXorScalarGetWorkspaceSize.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        op.aclnnInplaceBitwiseXorScalarGetWorkspaceSize.restype = ctypes.c_int
+        op.aclnnInplaceBitwiseXorScalar.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+        ]
+        op.aclnnInplaceBitwiseXorScalar.restype = ctypes.c_int
+
+    def apply(self, address: int, size: int, value: int) -> DeviceTransformEvidence:
+        self.runtime._require_initialized()
+        if address <= 0 or size <= 0:
+            raise ValueError("transform address and size must be positive")
+        if not 0 <= value <= 0xFF:
+            raise ValueError("UINT8 XOR value must be in [0, 255]")
+
+        shape = (ctypes.c_int64 * 1)(size)
+        stride = (ctypes.c_int64 * 1)(1)
+        tensor = self._op_library.aclCreateTensor(
+            shape,
+            1,
+            ACL_UINT8,
+            stride,
+            0,
+            ACL_FORMAT_ND,
+            shape,
+            1,
+            address,
+        )
+        if not tensor:
+            raise AclError("aclCreateTensor returned null")
+        scalar_value = ctypes.c_uint8(value)
+        scalar = self._op_library.aclCreateScalar(ctypes.byref(scalar_value), ACL_UINT8)
+        if not scalar:
+            self._op_library.aclDestroyTensor(tensor)
+            raise AclError("aclCreateScalar returned null")
+
+        stream = ctypes.c_void_p()
+        workspace = ctypes.c_void_p()
+        workspace_bytes = ctypes.c_uint64()
+        executor = ctypes.c_void_p()
+        failures: list[str] = []
+        started_ns = 0
+        elapsed_ns = 0
+        try:
+            self.runtime._check(
+                "aclnnInplaceBitwiseXorScalarGetWorkspaceSize",
+                self._op_library.aclnnInplaceBitwiseXorScalarGetWorkspaceSize(
+                    tensor,
+                    scalar,
+                    ctypes.byref(workspace_bytes),
+                    ctypes.byref(executor),
+                ),
+            )
+            if not executor.value:
+                raise AclError("aclnnInplaceBitwiseXorScalar returned a null executor")
+            self.runtime._check("aclrtCreateStream", self.runtime._library.aclrtCreateStream(ctypes.byref(stream)))
+            if workspace_bytes.value:
+                self.runtime._check(
+                    "aclrtMalloc workspace",
+                    self.runtime._library.aclrtMalloc(
+                        ctypes.byref(workspace),
+                        workspace_bytes.value,
+                        ACL_MEM_MALLOC_HUGE_FIRST,
+                    ),
+                )
+            started_ns = perf_counter_ns()
+            self.runtime._check(
+                self.API,
+                self._op_library.aclnnInplaceBitwiseXorScalar(
+                    workspace,
+                    workspace_bytes.value,
+                    executor,
+                    stream,
+                ),
+            )
+            self.runtime._check(
+                "aclrtSynchronizeStream",
+                self.runtime._library.aclrtSynchronizeStream(stream),
+            )
+            elapsed_ns = perf_counter_ns() - started_ns
+        finally:
+            if workspace.value:
+                result = self.runtime._library.aclrtFree(workspace)
+                if result != ACL_SUCCESS:
+                    failures.append(f"aclrtFree workspace failed with code {result}")
+            if stream.value:
+                result = self.runtime._library.aclrtDestroyStream(stream)
+                if result != ACL_SUCCESS:
+                    failures.append(f"aclrtDestroyStream failed with code {result}")
+            result = self._op_library.aclDestroyScalar(scalar)
+            if result != ACL_SUCCESS:
+                failures.append(f"aclDestroyScalar failed with code {result}")
+            result = self._op_library.aclDestroyTensor(tensor)
+            if result != ACL_SUCCESS:
+                failures.append(f"aclDestroyTensor failed with code {result}")
+            if failures:
+                raise AclError("; ".join(failures))
+        return DeviceTransformEvidence(
+            api=self.API,
+            elapsed_ns=elapsed_ns,
+            workspace_bytes=int(workspace_bytes.value),
+        )
