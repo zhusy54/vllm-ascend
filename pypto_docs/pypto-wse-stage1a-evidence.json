@@ -1,0 +1,1303 @@
+{
+  "collected_at": "2026-09-08T06:27:00.898126+00:00",
+  "conclusion": {
+    "capability_level": "C1",
+    "claim_scope": "NPU_SURROGATE_ONLY",
+    "evidence_status": "SIMULATION",
+    "npu_wse_capability_level": "NOT_ESTABLISHED",
+    "t01": "PASS",
+    "t02": "PASS",
+    "t03": "NOT_RUN"
+  },
+  "diagnostic_runs": [
+    {
+      "endpoints": {
+        "ATTENTION": {
+          "cleanup": {
+            "imported_window": "CLOSED",
+            "owned_window": "CLOSED",
+            "runtime": "CLOSED"
+          },
+          "control": {
+            "received_bytes": 1717,
+            "received_messages": {
+              "ATTACHED": 1,
+              "MANIFEST": 1,
+              "READY": 1,
+              "VERIFIED": 4
+            },
+            "sent_bytes": 1830,
+            "sent_messages": {
+              "ATTACHED": 1,
+              "MANIFEST": 1,
+              "READY": 1,
+              "TRANSFER_COMPLETE": 4
+            }
+          },
+          "device_id": 0,
+          "error": {
+            "message": "T01 failed for 1048576 bytes: expected_sha256=05753ea8bc39, observed_sha256=ad2403d20846",
+            "type": "Stage1AError"
+          },
+          "manifest": {
+            "backend": "cann_acl_vmm_p2p",
+            "device_id": 0,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "logical_bytes": 1048576,
+            "mapping_bytes": 2097152,
+            "opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "f8de674b6f9d20ee8ceccae5029ed260a465ec00c4325b418759fc01e62f4cf6"
+            },
+            "transport_scope": "HOST_LOCAL"
+          },
+          "observations": [
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T01",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "NPU_TO_WSE_SURROGATE",
+              "elapsed_ns": 108212,
+              "expected_checksum": "fd150dd4f8ca03555cd2c7817181c4d2f792e303844db1c8600ae3a9dce5a71d",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 64,
+              "host_verification_bytes": 64,
+              "observed_checksum": "fd150dd4f8ca03555cd2c7817181c4d2f792e303844db1c8600ae3a9dce5a71d",
+              "passed": true,
+              "payload_bytes": 64,
+              "sequence_id": 1,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T01",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "NPU_TO_WSE_SURROGATE",
+              "elapsed_ns": 81482,
+              "expected_checksum": "68750a48c080981ed64cb2c404b229c9bd598972fd02f762945cbd457670b939",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 4096,
+              "host_verification_bytes": 4096,
+              "observed_checksum": "68750a48c080981ed64cb2c404b229c9bd598972fd02f762945cbd457670b939",
+              "passed": true,
+              "payload_bytes": 4096,
+              "sequence_id": 2,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T01",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "NPU_TO_WSE_SURROGATE",
+              "elapsed_ns": 106079,
+              "expected_checksum": "14c44e583bf1e37459354d32f3141eaf316a1f91359090f04b7ea53d78fc8aed",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 65536,
+              "host_verification_bytes": 65536,
+              "observed_checksum": "14c44e583bf1e37459354d32f3141eaf316a1f91359090f04b7ea53d78fc8aed",
+              "passed": true,
+              "payload_bytes": 65536,
+              "sequence_id": 3,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T01",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": false,
+              "direction": "NPU_TO_WSE_SURROGATE",
+              "elapsed_ns": 99219,
+              "expected_checksum": "05753ea8bc39450c54e1bc26faf707c867e3b0e5208e9cbebd86105611d2f514",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 1048576,
+              "host_verification_bytes": 1048576,
+              "observed_checksum": "ad2403d20846c7b13522b151c9e8cec29272b8b44c4c930ac51b176ab1981e34",
+              "passed": false,
+              "payload_bytes": 1048576,
+              "sequence_id": 4,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            }
+          ],
+          "role": "ATTENTION",
+          "success": false
+        },
+        "WSE_SURROGATE": {
+          "cleanup": {
+            "imported_window": "CLOSED",
+            "owned_window": "CLOSED",
+            "runtime": "CLOSED"
+          },
+          "control": {
+            "received_bytes": 1830,
+            "received_messages": {
+              "ATTACHED": 1,
+              "MANIFEST": 1,
+              "READY": 1,
+              "TRANSFER_COMPLETE": 4
+            },
+            "sent_bytes": 2031,
+            "sent_messages": {
+              "ATTACHED": 1,
+              "MANIFEST": 1,
+              "READY": 1,
+              "TRANSFER_COMPLETE": 1,
+              "VERIFIED": 4
+            }
+          },
+          "device_id": 1,
+          "error": {
+            "message": "control connection closed before a complete frame was received",
+            "type": "BootstrapError"
+          },
+          "manifest": {
+            "backend": "cann_acl_vmm_p2p",
+            "device_id": 1,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "logical_bytes": 1048576,
+            "mapping_bytes": 2097152,
+            "opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "8d69b0f05be75ad970a7308d522abb158f3b3ae2d1ca46f7ac8352049260438c"
+            },
+            "transport_scope": "HOST_LOCAL"
+          },
+          "observations": [],
+          "role": "WSE_SURROGATE",
+          "success": false
+        }
+      },
+      "result": {
+        "actual_backend": "cann_acl_vmm_p2p",
+        "capability_level": "NONE",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "completed_at": "2026-09-08T06:17:26.370733+00:00",
+        "control_plane": {
+          "bytes_on_wire": 3861,
+          "message_counts": {
+            "ATTACHED": 2,
+            "MANIFEST": 2,
+            "READY": 2,
+            "TRANSFER_COMPLETE": 5,
+            "VERIFIED": 4
+          },
+          "transport": "TCP_LOOPBACK"
+        },
+        "data_results": {
+          "NPU_TO_WSE_SURROGATE": {
+            "attempts": 4,
+            "bytes": 1118272,
+            "passed": 3,
+            "status": "FAIL"
+          },
+          "WSE_SURROGATE_TO_NPU": {
+            "attempts": 0,
+            "bytes": 0,
+            "passed": 0,
+            "status": "FAIL"
+          }
+        },
+        "devices": {
+          "ATTENTION": 0,
+          "WSE_SURROGATE": 1
+        },
+        "endpoints": {
+          "ATTENTION": {
+            "artifact": "attention_stage1a.json",
+            "exit_code": 1,
+            "host_log": {
+              "bytes": 430,
+              "path": "attention_stage1a.log",
+              "sha256": "eb58f0a6d025c7cf236930227b79ca91c727089fff7ffc96e712a3a6e452d9ca"
+            },
+            "pid": 2810227,
+            "success": false
+          },
+          "WSE_SURROGATE": {
+            "artifact": "wse_surrogate_stage1a.json",
+            "exit_code": 1,
+            "host_log": {
+              "bytes": 1189,
+              "path": "wse_surrogate_stage1a.log",
+              "sha256": "f02b576b403c4cd82c8282e42bb254415d5fa30e8d842e5a243002105421ecf8"
+            },
+            "pid": 2810250,
+            "success": false
+          }
+        },
+        "evidence_status": "SIMULATION",
+        "fallback_used": false,
+        "generation": 1,
+        "host_bounce_bytes": 0,
+        "host_source_staging_bytes": 1118272,
+        "host_verification_bytes": 1118272,
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "profile": "NPU_SURROGATE",
+        "run_id": "stage1a-p0-20260908-03",
+        "schema_version": 1,
+        "start_order": "attention-first",
+        "success": false,
+        "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+        "transport_identity_evidence": [
+          "aclrtDeviceEnablePeerAccess returned success",
+          "ACL VMM shareable handle exported and imported",
+          "aclrtMemcpy used ACL_MEMCPY_DEVICE_TO_DEVICE"
+        ],
+        "transport_scope": "HOST_LOCAL"
+      },
+      "task_id": "task_20260908_141717_281007320337"
+    },
+    {
+      "endpoints": {
+        "ATTENTION": {
+          "cleanup": {
+            "imported_window": "CLOSED",
+            "owned_window": "CLOSED",
+            "runtime": "CLOSED"
+          },
+          "control": {
+            "received_bytes": 594,
+            "received_messages": {
+              "ATTACHED": 1,
+              "MANIFEST": 1,
+              "READY": 1
+            },
+            "sent_bytes": 582,
+            "sent_messages": {
+              "ATTACHED": 1,
+              "MANIFEST": 1,
+              "READY": 1
+            }
+          },
+          "device_id": 0,
+          "error": {
+            "message": "aclrtMemcpy D2D failed with code 100000",
+            "type": "AclError"
+          },
+          "manifest": {
+            "backend": "cann_acl_vmm_p2p",
+            "device_id": 0,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "logical_bytes": 1048576,
+            "mapping_bytes": 2097152,
+            "opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "78b6718baafb6e748322e402664b34883cb80a2be045d5cfccf5cedd4cc8220c"
+            },
+            "transport_scope": "HOST_LOCAL"
+          },
+          "observations": [],
+          "role": "ATTENTION",
+          "success": false
+        },
+        "WSE_SURROGATE": {
+          "cleanup": {
+            "imported_window": "CLOSED",
+            "owned_window": "CLOSED",
+            "runtime": "CLOSED"
+          },
+          "control": {
+            "received_bytes": 582,
+            "received_messages": {
+              "ATTACHED": 1,
+              "MANIFEST": 1,
+              "READY": 1
+            },
+            "sent_bytes": 594,
+            "sent_messages": {
+              "ATTACHED": 1,
+              "MANIFEST": 1,
+              "READY": 1
+            }
+          },
+          "device_id": 1,
+          "error": {
+            "message": "control connection closed before a complete frame was received",
+            "type": "BootstrapError"
+          },
+          "manifest": {
+            "backend": "cann_acl_vmm_p2p",
+            "device_id": 1,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "logical_bytes": 1048576,
+            "mapping_bytes": 2097152,
+            "opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "d6de07f2e5e11c52aa65ea03a5ed49a5c5512a2a2fac8f7baea92d3604c3272e"
+            },
+            "transport_scope": "HOST_LOCAL"
+          },
+          "observations": [],
+          "role": "WSE_SURROGATE",
+          "success": false
+        }
+      },
+      "result": {
+        "actual_backend": "cann_acl_vmm_p2p",
+        "capability_level": "NONE",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "completed_at": "2026-09-08T06:16:19.282698+00:00",
+        "control_plane": {
+          "bytes_on_wire": 1176,
+          "message_counts": {
+            "ATTACHED": 2,
+            "MANIFEST": 2,
+            "READY": 2
+          },
+          "transport": "TCP_LOOPBACK"
+        },
+        "data_results": {
+          "NPU_TO_WSE_SURROGATE": {
+            "attempts": 0,
+            "bytes": 0,
+            "passed": 0,
+            "status": "FAIL"
+          },
+          "WSE_SURROGATE_TO_NPU": {
+            "attempts": 0,
+            "bytes": 0,
+            "passed": 0,
+            "status": "FAIL"
+          }
+        },
+        "devices": {
+          "ATTENTION": 0,
+          "WSE_SURROGATE": 1
+        },
+        "endpoints": {
+          "ATTENTION": {
+            "artifact": "attention_stage1a.json",
+            "exit_code": 1,
+            "host_log": {
+              "bytes": 780,
+              "path": "attention_stage1a.log",
+              "sha256": "6a3c605b56d2d7516c76b5ee7c1139920076d8e9e8548f9ba31415de5a06f082"
+            },
+            "pid": 2806208,
+            "success": false
+          },
+          "WSE_SURROGATE": {
+            "artifact": "wse_surrogate_stage1a.json",
+            "exit_code": 1,
+            "host_log": {
+              "bytes": 1209,
+              "path": "wse_surrogate_stage1a.log",
+              "sha256": "dec1ed4e1ad24ab18431741b0546fc8ce854f3a6d9263ebbce493c323dee42e5"
+            },
+            "pid": 2806173,
+            "success": false
+          }
+        },
+        "evidence_status": "SIMULATION",
+        "fallback_used": false,
+        "generation": 1,
+        "host_bounce_bytes": 0,
+        "host_source_staging_bytes": 0,
+        "host_verification_bytes": 0,
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "profile": "NPU_SURROGATE",
+        "run_id": "stage1a-p0-20260908-02",
+        "schema_version": 1,
+        "start_order": "wse-first",
+        "success": false,
+        "transfer_api": "aclrtMemcpy:ACL_MEMCPY_INTER_DEVICE_TO_DEVICE",
+        "transport_identity_evidence": [
+          "aclrtDeviceEnablePeerAccess returned success",
+          "ACL VMM shareable handle exported and imported",
+          "aclrtMemcpy used ACL_MEMCPY_INTER_DEVICE_TO_DEVICE"
+        ],
+        "transport_scope": "HOST_LOCAL"
+      },
+      "task_id": "task_20260908_141610_28060536058"
+    }
+  ],
+  "implementation_revision": "8b3c5059",
+  "profile": "NPU_SURROGATE",
+  "schema_version": 1,
+  "successful_runs": [
+    {
+      "endpoints": {
+        "ATTENTION": {
+          "cleanup": {
+            "imported_window": "CLOSED",
+            "owned_window": "CLOSED",
+            "runtime": "CLOSED"
+          },
+          "control": {
+            "received_bytes": 3461,
+            "received_messages": {
+              "ATTACHED": 1,
+              "DETACHED": 1,
+              "DRAIN": 1,
+              "MANIFEST": 1,
+              "READY": 1,
+              "RELEASED": 1,
+              "TRANSFER_COMPLETE": 4,
+              "VERIFIED": 4
+            },
+            "sent_bytes": 3404,
+            "sent_messages": {
+              "ATTACHED": 1,
+              "DETACHED": 1,
+              "DRAIN": 1,
+              "MANIFEST": 1,
+              "READY": 1,
+              "RELEASED": 1,
+              "TRANSFER_COMPLETE": 4,
+              "VERIFIED": 4
+            }
+          },
+          "device_id": 0,
+          "error": null,
+          "manifest": {
+            "backend": "cann_acl_vmm_p2p",
+            "device_id": 0,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "logical_bytes": 1048576,
+            "mapping_bytes": 2097152,
+            "opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "2e03d9a5cdf029b05f727902ec4e890b3fcd954b12606227e0fc295e11b9284f"
+            },
+            "transport_scope": "HOST_LOCAL"
+          },
+          "observations": [
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T01",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "NPU_TO_WSE_SURROGATE",
+              "elapsed_ns": 109274,
+              "expected_checksum": "9c57df5869fb982f5584cbc4679d8aee76b0e29ef9a0fcf177cf3a4b2e59c3ff",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 64,
+              "host_verification_bytes": 64,
+              "max_transfer_chunk_bytes": 64,
+              "observed_checksum": "9c57df5869fb982f5584cbc4679d8aee76b0e29ef9a0fcf177cf3a4b2e59c3ff",
+              "passed": true,
+              "payload_bytes": 64,
+              "sequence_id": 1,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 1,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T01",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "NPU_TO_WSE_SURROGATE",
+              "elapsed_ns": 80020,
+              "expected_checksum": "2b31aa4693d7cb40ec1df6bfb33c864e66281fd4d5f7b3a5e5423d863ce85c44",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 4096,
+              "host_verification_bytes": 4096,
+              "max_transfer_chunk_bytes": 4096,
+              "observed_checksum": "2b31aa4693d7cb40ec1df6bfb33c864e66281fd4d5f7b3a5e5423d863ce85c44",
+              "passed": true,
+              "payload_bytes": 4096,
+              "sequence_id": 2,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 1,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T01",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "NPU_TO_WSE_SURROGATE",
+              "elapsed_ns": 113169,
+              "expected_checksum": "32d06a5c8c3d16b25824955de498635a1ca03dd1e0f534098b6cc9c82b9c35fc",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 65536,
+              "host_verification_bytes": 65536,
+              "max_transfer_chunk_bytes": 65536,
+              "observed_checksum": "32d06a5c8c3d16b25824955de498635a1ca03dd1e0f534098b6cc9c82b9c35fc",
+              "passed": true,
+              "payload_bytes": 65536,
+              "sequence_id": 3,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 1,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T01",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "NPU_TO_WSE_SURROGATE",
+              "elapsed_ns": 1531690,
+              "expected_checksum": "e5dca54948b19d8437a014dfb94cb421b903adcb356b5f11f73ca08c0c2e7f4b",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 1048576,
+              "host_verification_bytes": 1048576,
+              "max_transfer_chunk_bytes": 65536,
+              "observed_checksum": "e5dca54948b19d8437a014dfb94cb421b903adcb356b5f11f73ca08c0c2e7f4b",
+              "passed": true,
+              "payload_bytes": 1048576,
+              "sequence_id": 4,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 16,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            }
+          ],
+          "role": "ATTENTION",
+          "success": true
+        },
+        "WSE_SURROGATE": {
+          "cleanup": {
+            "imported_window": "CLOSED",
+            "owned_window": "CLOSED",
+            "runtime": "CLOSED"
+          },
+          "control": {
+            "received_bytes": 3404,
+            "received_messages": {
+              "ATTACHED": 1,
+              "DETACHED": 1,
+              "DRAIN": 1,
+              "MANIFEST": 1,
+              "READY": 1,
+              "RELEASED": 1,
+              "TRANSFER_COMPLETE": 4,
+              "VERIFIED": 4
+            },
+            "sent_bytes": 3461,
+            "sent_messages": {
+              "ATTACHED": 1,
+              "DETACHED": 1,
+              "DRAIN": 1,
+              "MANIFEST": 1,
+              "READY": 1,
+              "RELEASED": 1,
+              "TRANSFER_COMPLETE": 4,
+              "VERIFIED": 4
+            }
+          },
+          "device_id": 1,
+          "error": null,
+          "manifest": {
+            "backend": "cann_acl_vmm_p2p",
+            "device_id": 1,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "logical_bytes": 1048576,
+            "mapping_bytes": 2097152,
+            "opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "57b79520a537eed2fcdfe34796dfdac464ffa9cead7c5a751fdd31fdf189f12c"
+            },
+            "transport_scope": "HOST_LOCAL"
+          },
+          "observations": [
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T02",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "WSE_SURROGATE_TO_NPU",
+              "elapsed_ns": 134151,
+              "expected_checksum": "bd87d527364cc4c6dd8869369956f720f414ee66278ead2f28726a791f5bd9ad",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 64,
+              "host_verification_bytes": 64,
+              "max_transfer_chunk_bytes": 64,
+              "observed_checksum": "bd87d527364cc4c6dd8869369956f720f414ee66278ead2f28726a791f5bd9ad",
+              "passed": true,
+              "payload_bytes": 64,
+              "sequence_id": 5,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 1,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T02",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "WSE_SURROGATE_TO_NPU",
+              "elapsed_ns": 116075,
+              "expected_checksum": "75935328d99d2928dcf949f9195216645599164e2d1eecd220c45b165a0f85e1",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 4096,
+              "host_verification_bytes": 4096,
+              "max_transfer_chunk_bytes": 4096,
+              "observed_checksum": "75935328d99d2928dcf949f9195216645599164e2d1eecd220c45b165a0f85e1",
+              "passed": true,
+              "payload_bytes": 4096,
+              "sequence_id": 6,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 1,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T02",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "WSE_SURROGATE_TO_NPU",
+              "elapsed_ns": 121722,
+              "expected_checksum": "485be0f3bc20162a06fb6c4c3c2430d45a5a009c48a89d397413fe5676badc66",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 65536,
+              "host_verification_bytes": 65536,
+              "max_transfer_chunk_bytes": 65536,
+              "observed_checksum": "485be0f3bc20162a06fb6c4c3c2430d45a5a009c48a89d397413fe5676badc66",
+              "passed": true,
+              "payload_bytes": 65536,
+              "sequence_id": 7,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 1,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T02",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "WSE_SURROGATE_TO_NPU",
+              "elapsed_ns": 1553913,
+              "expected_checksum": "5a0c06d3270f1316f1590a822367688882493938e1a5533e9ab26de1df282c9a",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 1048576,
+              "host_verification_bytes": 1048576,
+              "max_transfer_chunk_bytes": 65536,
+              "observed_checksum": "5a0c06d3270f1316f1590a822367688882493938e1a5533e9ab26de1df282c9a",
+              "passed": true,
+              "payload_bytes": 1048576,
+              "sequence_id": 8,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 16,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            }
+          ],
+          "role": "WSE_SURROGATE",
+          "success": true
+        }
+      },
+      "result": {
+        "actual_backend": "cann_acl_vmm_p2p",
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "completed_at": "2026-09-08T06:23:37.523866+00:00",
+        "control_plane": {
+          "bytes_on_wire": 6865,
+          "message_counts": {
+            "ATTACHED": 2,
+            "DETACHED": 2,
+            "DRAIN": 2,
+            "MANIFEST": 2,
+            "READY": 2,
+            "RELEASED": 2,
+            "TRANSFER_COMPLETE": 8,
+            "VERIFIED": 8
+          },
+          "transport": "TCP_LOOPBACK"
+        },
+        "data_results": {
+          "NPU_TO_WSE_SURROGATE": {
+            "attempts": 4,
+            "bytes": 1118272,
+            "passed": 4,
+            "status": "PASS"
+          },
+          "WSE_SURROGATE_TO_NPU": {
+            "attempts": 4,
+            "bytes": 1118272,
+            "passed": 4,
+            "status": "PASS"
+          }
+        },
+        "devices": {
+          "ATTENTION": 0,
+          "WSE_SURROGATE": 1
+        },
+        "endpoints": {
+          "ATTENTION": {
+            "artifact": "attention_stage1a.json",
+            "cleanup": {
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "device_logs": {
+              "files": [
+                {
+                  "bytes": 11053,
+                  "path": "run/device-0/device-2827726_20260908142334785.log",
+                  "sha256": "8b6ff104a84343479bec5c20c6a8f31afcaf4e40e1171f9dca5e3165ceb73aad"
+                },
+                {
+                  "bytes": 37225,
+                  "path": "run/plog/plog-2827726_20260908142330205.log",
+                  "sha256": "4608e71f1b5c5a9dad01ad9d0feb1a8d16558067cf75c58cba0f19dbb2f6e035"
+                }
+              ],
+              "p2p_enable_observed": true,
+              "p2p_memory_released": true
+            },
+            "exit_code": 0,
+            "host_log": {
+              "bytes": 0,
+              "path": "attention_stage1a.log",
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "pid": 2827726,
+            "success": true
+          },
+          "WSE_SURROGATE": {
+            "artifact": "wse_surrogate_stage1a.json",
+            "cleanup": {
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "device_logs": {
+              "files": [
+                {
+                  "bytes": 11052,
+                  "path": "run/device-1/device-2827738_20260908142334513.log",
+                  "sha256": "96efcc767a07c2a7ab96220bafeed1319f70efa9f8b9a20d917e7747af67af71"
+                },
+                {
+                  "bytes": 37225,
+                  "path": "run/plog/plog-2827738_20260908142330457.log",
+                  "sha256": "611055d1bc088535b7039af5fa0cf872e0ff7ed0771034c6cb6da6ef8fe5d797"
+                }
+              ],
+              "p2p_enable_observed": true,
+              "p2p_memory_released": true
+            },
+            "exit_code": 0,
+            "host_log": {
+              "bytes": 0,
+              "path": "wse_surrogate_stage1a.log",
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "pid": 2827738,
+            "success": true
+          }
+        },
+        "evidence_status": "SIMULATION",
+        "fallback_used": false,
+        "generation": 1,
+        "host_bounce_bytes": 0,
+        "host_source_staging_bytes": 2236544,
+        "host_verification_bytes": 2236544,
+        "max_transfer_chunk_bytes": 65536,
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "profile": "NPU_SURROGATE",
+        "resource_cleanup": "VERIFIED",
+        "run_id": "stage1a-p0-20260908-07",
+        "schema_version": 1,
+        "start_order": "attention-first",
+        "success": true,
+        "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+        "transport_identity_evidence": [
+          "aclrtDeviceEnablePeerAccess returned success",
+          "ACL VMM shareable handle exported and imported",
+          "aclrtMemcpy used ACL_MEMCPY_DEVICE_TO_DEVICE",
+          "driver logs contain Enable P2P and released P2P_HBM counters"
+        ],
+        "transport_scope": "HOST_LOCAL"
+      },
+      "task_id": "task_20260908_142329_282755125771"
+    },
+    {
+      "endpoints": {
+        "ATTENTION": {
+          "cleanup": {
+            "imported_window": "CLOSED",
+            "owned_window": "CLOSED",
+            "runtime": "CLOSED"
+          },
+          "control": {
+            "received_bytes": 3460,
+            "received_messages": {
+              "ATTACHED": 1,
+              "DETACHED": 1,
+              "DRAIN": 1,
+              "MANIFEST": 1,
+              "READY": 1,
+              "RELEASED": 1,
+              "TRANSFER_COMPLETE": 4,
+              "VERIFIED": 4
+            },
+            "sent_bytes": 3403,
+            "sent_messages": {
+              "ATTACHED": 1,
+              "DETACHED": 1,
+              "DRAIN": 1,
+              "MANIFEST": 1,
+              "READY": 1,
+              "RELEASED": 1,
+              "TRANSFER_COMPLETE": 4,
+              "VERIFIED": 4
+            }
+          },
+          "device_id": 0,
+          "error": null,
+          "manifest": {
+            "backend": "cann_acl_vmm_p2p",
+            "device_id": 0,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "logical_bytes": 1048576,
+            "mapping_bytes": 2097152,
+            "opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "27c64f481085654ff7466a4e513fcf25d88bef318c77c865f164b082667d738d"
+            },
+            "transport_scope": "HOST_LOCAL"
+          },
+          "observations": [
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T01",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "NPU_TO_WSE_SURROGATE",
+              "elapsed_ns": 94713,
+              "expected_checksum": "d091b1af1cfa7019d26129dfe3a6d732a0cd06dfe72cafe5fa94138818c7c092",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 64,
+              "host_verification_bytes": 64,
+              "max_transfer_chunk_bytes": 64,
+              "observed_checksum": "d091b1af1cfa7019d26129dfe3a6d732a0cd06dfe72cafe5fa94138818c7c092",
+              "passed": true,
+              "payload_bytes": 64,
+              "sequence_id": 1,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 1,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T01",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "NPU_TO_WSE_SURROGATE",
+              "elapsed_ns": 72189,
+              "expected_checksum": "2dce364170a363b5d9669b0d98756cee43b981cd3b8da74f073cce5f0a5fa3f7",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 4096,
+              "host_verification_bytes": 4096,
+              "max_transfer_chunk_bytes": 4096,
+              "observed_checksum": "2dce364170a363b5d9669b0d98756cee43b981cd3b8da74f073cce5f0a5fa3f7",
+              "passed": true,
+              "payload_bytes": 4096,
+              "sequence_id": 2,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 1,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T01",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "NPU_TO_WSE_SURROGATE",
+              "elapsed_ns": 100671,
+              "expected_checksum": "078ba2d53124d347e1ad0d298f2cb1715b05afa3739514e91bb9b4f58ba11aef",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 65536,
+              "host_verification_bytes": 65536,
+              "max_transfer_chunk_bytes": 65536,
+              "observed_checksum": "078ba2d53124d347e1ad0d298f2cb1715b05afa3739514e91bb9b4f58ba11aef",
+              "passed": true,
+              "payload_bytes": 65536,
+              "sequence_id": 3,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 1,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T01",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "NPU_TO_WSE_SURROGATE",
+              "elapsed_ns": 1433141,
+              "expected_checksum": "b5b1e86644d7869c6284484721554a774d1ab43339ed710d521b3f8aa0253258",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 1048576,
+              "host_verification_bytes": 1048576,
+              "max_transfer_chunk_bytes": 65536,
+              "observed_checksum": "b5b1e86644d7869c6284484721554a774d1ab43339ed710d521b3f8aa0253258",
+              "passed": true,
+              "payload_bytes": 1048576,
+              "sequence_id": 4,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 16,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            }
+          ],
+          "role": "ATTENTION",
+          "success": true
+        },
+        "WSE_SURROGATE": {
+          "cleanup": {
+            "imported_window": "CLOSED",
+            "owned_window": "CLOSED",
+            "runtime": "CLOSED"
+          },
+          "control": {
+            "received_bytes": 3403,
+            "received_messages": {
+              "ATTACHED": 1,
+              "DETACHED": 1,
+              "DRAIN": 1,
+              "MANIFEST": 1,
+              "READY": 1,
+              "RELEASED": 1,
+              "TRANSFER_COMPLETE": 4,
+              "VERIFIED": 4
+            },
+            "sent_bytes": 3460,
+            "sent_messages": {
+              "ATTACHED": 1,
+              "DETACHED": 1,
+              "DRAIN": 1,
+              "MANIFEST": 1,
+              "READY": 1,
+              "RELEASED": 1,
+              "TRANSFER_COMPLETE": 4,
+              "VERIFIED": 4
+            }
+          },
+          "device_id": 1,
+          "error": null,
+          "manifest": {
+            "backend": "cann_acl_vmm_p2p",
+            "device_id": 1,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "logical_bytes": 1048576,
+            "mapping_bytes": 2097152,
+            "opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "8b944bc4e88f9aab11e5534b50a889cc1c7eaf75b02207643e7e1cf0d72368f9"
+            },
+            "transport_scope": "HOST_LOCAL"
+          },
+          "observations": [
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T02",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "WSE_SURROGATE_TO_NPU",
+              "elapsed_ns": 123125,
+              "expected_checksum": "990ca0b87ae3cae1215ed7877ed02a0a012a38cc11b5f2d51995633c4e60b7b2",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 64,
+              "host_verification_bytes": 64,
+              "max_transfer_chunk_bytes": 64,
+              "observed_checksum": "990ca0b87ae3cae1215ed7877ed02a0a012a38cc11b5f2d51995633c4e60b7b2",
+              "passed": true,
+              "payload_bytes": 64,
+              "sequence_id": 5,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 1,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T02",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "WSE_SURROGATE_TO_NPU",
+              "elapsed_ns": 85428,
+              "expected_checksum": "2d97f11c1c2e3407df6c3299574154d0645c01f35275cce8b4914b418dc69a66",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 4096,
+              "host_verification_bytes": 4096,
+              "max_transfer_chunk_bytes": 4096,
+              "observed_checksum": "2d97f11c1c2e3407df6c3299574154d0645c01f35275cce8b4914b418dc69a66",
+              "passed": true,
+              "payload_bytes": 4096,
+              "sequence_id": 6,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 1,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T02",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "WSE_SURROGATE_TO_NPU",
+              "elapsed_ns": 107011,
+              "expected_checksum": "dcaa469cb3307dcfb51794fb9ae3686723649229758da41fe782c5481a4c25fa",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 65536,
+              "host_verification_bytes": 65536,
+              "max_transfer_chunk_bytes": 65536,
+              "observed_checksum": "dcaa469cb3307dcfb51794fb9ae3686723649229758da41fe782c5481a4c25fa",
+              "passed": true,
+              "payload_bytes": 65536,
+              "sequence_id": 7,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 1,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "case_id": "T02",
+              "destination_memory": "DEVICE_MEMORY",
+              "destination_verified": true,
+              "direction": "WSE_SURROGATE_TO_NPU",
+              "elapsed_ns": 1509395,
+              "expected_checksum": "aa554e76882ed33ffd029952edc5f2a8a70c39510157f9551b251400b897cf7d",
+              "fallback_used": false,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "host_bounce_bytes": 0,
+              "host_source_staging_bytes": 1048576,
+              "host_verification_bytes": 1048576,
+              "max_transfer_chunk_bytes": 65536,
+              "observed_checksum": "aa554e76882ed33ffd029952edc5f2a8a70c39510157f9551b251400b897cf7d",
+              "passed": true,
+              "payload_bytes": 1048576,
+              "sequence_id": 8,
+              "source_filled": true,
+              "source_memory": "DEVICE_MEMORY",
+              "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+              "transfer_chunks": 16,
+              "transport_scope": "HOST_LOCAL",
+              "visibility_fence": "blocking_aclrtMemcpy_completion"
+            }
+          ],
+          "role": "WSE_SURROGATE",
+          "success": true
+        }
+      },
+      "result": {
+        "actual_backend": "cann_acl_vmm_p2p",
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "completed_at": "2026-09-08T06:22:53.561730+00:00",
+        "control_plane": {
+          "bytes_on_wire": 6863,
+          "message_counts": {
+            "ATTACHED": 2,
+            "DETACHED": 2,
+            "DRAIN": 2,
+            "MANIFEST": 2,
+            "READY": 2,
+            "RELEASED": 2,
+            "TRANSFER_COMPLETE": 8,
+            "VERIFIED": 8
+          },
+          "transport": "TCP_LOOPBACK"
+        },
+        "data_results": {
+          "NPU_TO_WSE_SURROGATE": {
+            "attempts": 4,
+            "bytes": 1118272,
+            "passed": 4,
+            "status": "PASS"
+          },
+          "WSE_SURROGATE_TO_NPU": {
+            "attempts": 4,
+            "bytes": 1118272,
+            "passed": 4,
+            "status": "PASS"
+          }
+        },
+        "devices": {
+          "ATTENTION": 0,
+          "WSE_SURROGATE": 1
+        },
+        "endpoints": {
+          "ATTENTION": {
+            "artifact": "attention_stage1a.json",
+            "cleanup": {
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "device_logs": {
+              "files": [
+                {
+                  "bytes": 11053,
+                  "path": "run/device-0/device-2826016_20260908142249674.log",
+                  "sha256": "4a8217c04b268487b3985702199d854ee52110f222eba099cce2e15653798651"
+                },
+                {
+                  "bytes": 37225,
+                  "path": "run/plog/plog-2826016_20260908142245593.log",
+                  "sha256": "d0ffd6669d151088c3637cd895c6618012dd66eac92a81d817b9a8a618da90c1"
+                }
+              ],
+              "p2p_enable_observed": true,
+              "p2p_memory_released": true
+            },
+            "exit_code": 0,
+            "host_log": {
+              "bytes": 0,
+              "path": "attention_stage1a.log",
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "pid": 2826016,
+            "success": true
+          },
+          "WSE_SURROGATE": {
+            "artifact": "wse_surrogate_stage1a.json",
+            "cleanup": {
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "device_logs": {
+              "files": [
+                {
+                  "bytes": 11052,
+                  "path": "run/device-1/device-2825997_20260908142249411.log",
+                  "sha256": "0e4ce197f3a7f8d2c1abecc3903cefa9482b2c3cf85faffd98cd0380e38f3f8f"
+                },
+                {
+                  "bytes": 37225,
+                  "path": "run/plog/plog-2825997_20260908142245342.log",
+                  "sha256": "0cd009b913d4d47ed42409a122aca9ee1b77b52c455ece9f3b26b7f2c78ec26e"
+                }
+              ],
+              "p2p_enable_observed": true,
+              "p2p_memory_released": true
+            },
+            "exit_code": 0,
+            "host_log": {
+              "bytes": 0,
+              "path": "wse_surrogate_stage1a.log",
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "pid": 2825997,
+            "success": true
+          }
+        },
+        "evidence_status": "SIMULATION",
+        "fallback_used": false,
+        "generation": 1,
+        "host_bounce_bytes": 0,
+        "host_source_staging_bytes": 2236544,
+        "host_verification_bytes": 2236544,
+        "max_transfer_chunk_bytes": 65536,
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "profile": "NPU_SURROGATE",
+        "resource_cleanup": "VERIFIED",
+        "run_id": "stage1a-p0-20260908-06",
+        "schema_version": 1,
+        "start_order": "wse-first",
+        "success": true,
+        "transfer_api": "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE",
+        "transport_identity_evidence": [
+          "aclrtDeviceEnablePeerAccess returned success",
+          "ACL VMM shareable handle exported and imported",
+          "aclrtMemcpy used ACL_MEMCPY_DEVICE_TO_DEVICE",
+          "driver logs contain Enable P2P and released P2P_HBM counters"
+        ],
+        "transport_scope": "HOST_LOCAL"
+      },
+      "task_id": "task_20260908_142244_282582925309"
+    }
+  ]
+}
