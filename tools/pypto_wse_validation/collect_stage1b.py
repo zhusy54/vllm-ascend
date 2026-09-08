@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Collect and validate sanitized Stage 1B T04 evidence."""
+"""Collect and validate sanitized Stage 1B device-loop evidence."""
 
 from __future__ import annotations
 
@@ -15,7 +15,14 @@ from pathlib import Path
 from typing import Any
 
 from tools.pypto_wse_validation.contracts import EndpointRole
-from tools.pypto_wse_validation.stage1b_contracts import T04_CASE_ID, T04_SEQUENCE_COUNT, T04Observation
+from tools.pypto_wse_validation.stage1b_contracts import (
+    T04_CASE_ID,
+    T04_SEQUENCE_COUNT,
+    T05_CASE_ID,
+    T05_SEQUENCE_COUNT,
+    T04Observation,
+    T05Observation,
+)
 
 SCHEMA_VERSION = 1
 FORBIDDEN_ARTIFACT_KEYS = frozenset({"address", "device_addr", "shareable_handle"})
@@ -62,20 +69,22 @@ def _endpoint_evidence(run_dir: Path, role: EndpointRole) -> dict[str, Any]:
     return evidence
 
 
-def _validate_success(result: Mapping[str, Any], endpoints: Mapping[str, Mapping[str, Any]]) -> None:
+def _validate_success(result: Mapping[str, Any], endpoints: Mapping[str, Mapping[str, Any]], case_id: str) -> None:
     observation_raw = result.get("observation")
-    if not isinstance(observation_raw, dict) or not T04Observation.from_dict(observation_raw).passed:
-        raise ValueError("successful run is missing valid T04 device-loop evidence")
-    t04_result = result.get("data_results", {}).get(T04_CASE_ID, {})
+    observation_type = T04Observation if case_id == T04_CASE_ID else T05Observation
+    if not isinstance(observation_raw, dict) or not observation_type.from_dict(observation_raw).passed:
+        raise ValueError(f"successful run is missing valid {case_id} device-loop evidence")
+    case_result = result.get("data_results", {}).get(case_id, {})
+    sequence_count = T04_SEQUENCE_COUNT if case_id == T04_CASE_ID else T05_SEQUENCE_COUNT
     if (
         result.get("success") is not True
-        or result.get("stage1b_progress") != "T04_PASS"
-        or t04_result.get("status") != "PASS"
-        or t04_result.get("passed") != T04_SEQUENCE_COUNT
+        or result.get("stage1b_progress") != f"{case_id}_PASS"
+        or case_result.get("status") != "PASS"
+        or case_result.get("passed") != sequence_count
     ):
-        raise ValueError("successful run has incomplete T04 results")
+        raise ValueError(f"successful run has incomplete {case_id} results")
     if result.get("capability_level") != "C1" or result.get("c2_status") != "NOT_ESTABLISHED":
-        raise ValueError("T04-only run overclaims C2")
+        raise ValueError(f"{case_id}-only run overclaims C2")
     if result.get("claim_scope") != "NPU_SURROGATE_ONLY":
         raise ValueError("successful run has an unsafe claim scope")
     if result.get("npu_wse_capability_level") != "NOT_ESTABLISHED":
@@ -86,7 +95,7 @@ def _validate_success(result: Mapping[str, Any], endpoints: Mapping[str, Mapping
         "payload_bytes": 0,
         "task_messages": 0,
     }:
-        raise ValueError("successful T04 run contains Host hot-path traffic")
+        raise ValueError(f"successful {case_id} run contains Host hot-path traffic")
     if result.get("resource_cleanup") != "VERIFIED" or result.get("host_bounce_bytes") != 0:
         raise ValueError("successful run is missing cleanup or zero-bounce proof")
     for role in EndpointRole:
@@ -95,10 +104,10 @@ def _validate_success(result: Mapping[str, Any], endpoints: Mapping[str, Mapping
             raise ValueError(f"successful run endpoint failed: {role.value}")
 
 
-def _load_run(task_id: str, run_dir: Path) -> dict[str, Any]:
+def _load_run(task_id: str, run_dir: Path, case_id: str) -> dict[str, Any]:
     result = _read_json(run_dir / "result.json")
     endpoints = {role.value: _endpoint_evidence(run_dir, role) for role in EndpointRole}
-    _validate_success(result, endpoints)
+    _validate_success(result, endpoints, case_id)
     return {"endpoints": endpoints, "result": result, "task_id": task_id}
 
 
@@ -106,24 +115,30 @@ def collect_stage1b(
     *,
     successful_runs: Sequence[tuple[str, Path]],
     implementation_revision: str,
+    case_id: str = T04_CASE_ID,
     collected_at: str | None = None,
 ) -> dict[str, Any]:
+    if case_id not in (T04_CASE_ID, T05_CASE_ID):
+        raise ValueError(f"unsupported Stage 1B case: {case_id}")
     if len(successful_runs) < 2:
         raise ValueError("at least two successful Stage 1B runs are required")
-    loaded = [_load_run(task_id, run_dir) for task_id, run_dir in successful_runs]
+    loaded = [_load_run(task_id, run_dir, case_id) for task_id, run_dir in successful_runs]
     if {run["result"].get("start_order") for run in loaded} != {"attention-first", "wse-first"}:
         raise ValueError("successful evidence must cover both endpoint start orders")
+    conclusion = {
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "c2_status": "NOT_ESTABLISHED",
+        "evidence_status": "SIMULATION",
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+    }
+    if case_id == T04_CASE_ID:
+        conclusion.update({"t04": "PASS", "t05_t12": "NOT_RUN"})
+    else:
+        conclusion.update({"t05": "PASS", "t06_t12": "NOT_RUN", "validated_case": case_id})
     return {
         "collected_at": collected_at or datetime.now(UTC).isoformat(),
-        "conclusion": {
-            "capability_level": "C1",
-            "claim_scope": "NPU_SURROGATE_ONLY",
-            "c2_status": "NOT_ESTABLISHED",
-            "evidence_status": "SIMULATION",
-            "npu_wse_capability_level": "NOT_ESTABLISHED",
-            "t04": "PASS",
-            "t05_t12": "NOT_RUN",
-        },
+        "conclusion": conclusion,
         "implementation_revision": implementation_revision,
         "profile": "NPU_SURROGATE",
         "schema_version": SCHEMA_VERSION,
@@ -151,6 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--successful-run", action="append", type=_parse_run, required=True)
     parser.add_argument("--implementation-revision", required=True)
+    parser.add_argument("--case-id", choices=(T04_CASE_ID, T05_CASE_ID), default=T04_CASE_ID)
     parser.add_argument("--collected-at")
     parser.add_argument("--output", type=Path, required=True)
     return parser
@@ -161,6 +177,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     evidence = collect_stage1b(
         successful_runs=args.successful_run,
         implementation_revision=args.implementation_revision,
+        case_id=args.case_id,
         collected_at=args.collected_at,
     )
     _write_json(args.output, evidence)
