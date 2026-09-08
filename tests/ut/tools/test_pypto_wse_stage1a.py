@@ -39,6 +39,7 @@ class _FakeRuntime:
 
     def copy_device_to_device(self, destination, source, size):
         self.memory[destination][:size] = self.memory[source][:size]
+        return (size + 64 * 1024 - 1) // (64 * 1024)
 
 
 def test_control_message_rejects_payload_data():
@@ -115,12 +116,19 @@ def test_aggregate_result_claims_only_surrogate_c1(tmp_path):
     processes = {}
     for index, role in enumerate(EndpointRole, start=1):
         artifact = {
+            "cleanup": {"imported_window": "CLOSED", "owned_window": "CLOSED", "runtime": "CLOSED"},
             "control": {"sent_bytes": 1, "sent_messages": {"TRANSFER_COMPLETE": 4, "VERIFIED": 4}},
             "observations": [item.to_dict() for item in observations[role]],
             "success": True,
         }
         (tmp_path / f"{role.value.lower()}_stage1a.json").write_text(json.dumps(artifact), encoding="utf-8")
         (tmp_path / f"{role.value.lower()}_stage1a.log").write_text("", encoding="utf-8")
+        device_logs = tmp_path / f"{role.value.lower()}_device_logs"
+        device_logs.mkdir()
+        (device_logs / "driver.log").write_text(
+            "Enable P2P\nMEM_DEV_SMALL_P2P_HBM current_alloced_size=0\n",
+            encoding="utf-8",
+        )
         processes[role] = SimpleNamespace(returncode=0, pid=index)
     args = SimpleNamespace(
         artifact_dir=tmp_path,
@@ -136,6 +144,7 @@ def test_aggregate_result_claims_only_surrogate_c1(tmp_path):
     assert result["npu_wse_capability_level"] == "NOT_ESTABLISHED"
     assert result["evidence_status"] == "SIMULATION"
     assert result["host_bounce_bytes"] == 0
+    assert result["resource_cleanup"] == "VERIFIED"
     assert result["host_source_staging_bytes"] > 0
     assert result["host_verification_bytes"] == result["host_source_staging_bytes"]
     assert result["data_results"]["NPU_TO_WSE_SURROGATE"]["passed"] == len(BASE_PAYLOAD_SIZES)

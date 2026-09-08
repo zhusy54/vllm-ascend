@@ -20,6 +20,7 @@ ACL_RT_VMM_EXPORT_FLAG_DISABLE_PID_VALIDATION = 0x1
 ACL_MEMCPY_HOST_TO_DEVICE = 1
 ACL_MEMCPY_DEVICE_TO_HOST = 2
 ACL_MEMCPY_DEVICE_TO_DEVICE = 3
+VALIDATION_P2P_CHUNK_BYTES = 64 * 1024
 
 
 class AclError(RuntimeError):
@@ -241,15 +242,26 @@ class AclVmmRuntime:
         )
         return destination.raw
 
-    def copy_device_to_device(self, destination: int, source: int, size: int) -> None:
+    def copy_device_to_device(self, destination: int, source: int, size: int) -> int:
         self._require_initialized()
         if destination <= 0 or source <= 0 or size <= 0:
             raise ValueError("source, destination, and size must be positive")
-        self._check(
-            "aclrtMemcpy D2D",
-            self._library.aclrtMemcpy(destination, size, source, size, ACL_MEMCPY_DEVICE_TO_DEVICE),
-        )
+        copy_calls = 0
+        for offset in range(0, size, VALIDATION_P2P_CHUNK_BYTES):
+            chunk_bytes = min(VALIDATION_P2P_CHUNK_BYTES, size - offset)
+            self._check(
+                "aclrtMemcpy D2D",
+                self._library.aclrtMemcpy(
+                    destination + offset,
+                    chunk_bytes,
+                    source + offset,
+                    chunk_bytes,
+                    ACL_MEMCPY_DEVICE_TO_DEVICE,
+                ),
+            )
+            copy_calls += 1
         self._check("aclrtSynchronizeDevice", self._library.aclrtSynchronizeDevice())
+        return copy_calls
 
     def close(self) -> None:
         if self._closed:

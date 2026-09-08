@@ -11,6 +11,7 @@ from tools.pypto_wse_validation.acl_vmm import (
     ACL_MEMCPY_DEVICE_TO_DEVICE,
     ACL_MEMCPY_DEVICE_TO_HOST,
     ACL_MEMCPY_HOST_TO_DEVICE,
+    VALIDATION_P2P_CHUNK_BYTES,
     AclError,
     AclVmmRuntime,
     VmmExport,
@@ -115,10 +116,22 @@ def test_copy_methods_use_exact_direction_and_explicit_sync():
     runtime, library = _runtime()
     runtime.copy_host_to_device(0x1000, b"abcd")
     runtime.copy_device_to_host(0x1000, 4)
-    runtime.copy_device_to_device(0x2000, 0x1000, 4)
+    assert runtime.copy_device_to_device(0x2000, 0x1000, 4) == 1
     kinds = [args[4] for name, args in library.calls if name == "aclrtMemcpy"]
     assert kinds == [ACL_MEMCPY_HOST_TO_DEVICE, ACL_MEMCPY_DEVICE_TO_HOST, ACL_MEMCPY_DEVICE_TO_DEVICE]
     assert any(name == "aclrtSynchronizeDevice" for name, _ in library.calls)
+    runtime.close()
+
+
+def test_large_p2p_copy_is_split_into_validated_chunks():
+    runtime, library = _runtime()
+    size = 1024 * 1024
+    assert runtime.copy_device_to_device(0x200000, 0x100000, size) == 16
+    copies = [args for name, args in library.calls if name == "aclrtMemcpy"]
+    assert len(copies) == 16
+    assert all(args[1] == VALIDATION_P2P_CHUNK_BYTES for args in copies)
+    assert copies[-1][0] == 0x200000 + 15 * VALIDATION_P2P_CHUNK_BYTES
+    assert copies[-1][2] == 0x100000 + 15 * VALIDATION_P2P_CHUNK_BYTES
     runtime.close()
 
 

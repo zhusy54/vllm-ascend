@@ -17,6 +17,7 @@ STAGE1A_BACKEND = "cann_acl_vmm_p2p"
 STAGE1A_HANDLE_KIND = "ACL_VMM_SHAREABLE_HANDLE"
 STAGE1A_TRANSFER_API = "aclrtMemcpy:ACL_MEMCPY_DEVICE_TO_DEVICE"
 STAGE1A_FENCE_API = "blocking_aclrtMemcpy_completion"
+VALIDATION_P2P_CHUNK_BYTES = 64 * 1024
 
 
 class TransferDirection(str, Enum):
@@ -86,6 +87,8 @@ class TransferObservation:
     source_filled: bool
     destination_verified: bool
     elapsed_ns: int
+    transfer_chunks: int
+    max_transfer_chunk_bytes: int
 
     def validate(self) -> None:
         if self.case_id != self.direction.case_id:
@@ -100,6 +103,8 @@ class TransferObservation:
             raise ContractError("host byte counters must be non-negative")
         if self.elapsed_ns < 0:
             raise ContractError("byte and elapsed counters must be non-negative")
+        if self.transfer_chunks < 1 or self.max_transfer_chunk_bytes < 1:
+            raise ContractError("transfer chunk evidence must be positive")
 
     @property
     def passed(self) -> bool:
@@ -120,6 +125,9 @@ class TransferObservation:
                 not self.fallback_used,
                 self.source_filled,
                 self.destination_verified,
+                self.transfer_chunks
+                == (self.payload_bytes + VALIDATION_P2P_CHUNK_BYTES - 1) // VALIDATION_P2P_CHUNK_BYTES,
+                self.max_transfer_chunk_bytes == min(self.payload_bytes, VALIDATION_P2P_CHUNK_BYTES),
             )
         )
 

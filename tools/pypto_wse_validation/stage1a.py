@@ -34,6 +34,7 @@ from tools.pypto_wse_validation.stage1a_contracts import (
     STAGE1A_FENCE_API,
     STAGE1A_HANDLE_KIND,
     STAGE1A_TRANSFER_API,
+    VALIDATION_P2P_CHUNK_BYTES,
     MemoryKind,
     TransferDirection,
     TransferObservation,
@@ -227,6 +228,7 @@ def _transfer_observation(
     observed_checksum: str,
     verified: bool,
     elapsed_ns: int,
+    transfer_chunks: int,
 ) -> TransferObservation:
     return TransferObservation(
         case_id=direction.case_id,
@@ -249,6 +251,8 @@ def _transfer_observation(
         source_filled=True,
         destination_verified=verified,
         elapsed_ns=elapsed_ns,
+        transfer_chunks=transfer_chunks,
+        max_transfer_chunk_bytes=min(size, VALIDATION_P2P_CHUNK_BYTES),
     )
 
 
@@ -258,9 +262,10 @@ def execute_transfer_matrix(
     runtime: Any,
     local_window: Any,
     peer_window: Any,
+    observation_sink: list[TransferObservation] | None = None,
 ) -> tuple[TransferObservation, ...]:
     """Execute this endpoint's half of T01/T02 and return initiated observations."""
-    observations: list[TransferObservation] = []
+    observations = observation_sink if observation_sink is not None else []
     sequence_id = 0
     for direction in TransferDirection:
         initiator_role = (
@@ -275,7 +280,7 @@ def execute_transfer_matrix(
             if protocol.role is initiator_role:
                 runtime.copy_host_to_device(local_window.address, expected)
                 started_ns = time.perf_counter_ns()
-                runtime.copy_device_to_device(peer_window.address, local_window.address, size)
+                transfer_chunks = runtime.copy_device_to_device(peer_window.address, local_window.address, size)
                 elapsed_ns = time.perf_counter_ns() - started_ns
                 protocol.send(
                     "TRANSFER_COMPLETE",
@@ -286,6 +291,7 @@ def execute_transfer_matrix(
                         "expected_checksum": expected_checksum,
                         "payload_bytes": size,
                         "sequence_id": sequence_id,
+                        "transfer_chunks": transfer_chunks,
                     },
                 )
                 verified = protocol.receive("VERIFIED")
@@ -301,10 +307,14 @@ def execute_transfer_matrix(
                     observed_checksum=observed_checksum,
                     verified=destination_verified,
                     elapsed_ns=elapsed_ns,
+                    transfer_chunks=transfer_chunks,
                 )
                 observations.append(observation)
                 if not observation.passed:
-                    raise Stage1AError(f"{direction.case_id} failed for {size} bytes")
+                    raise Stage1AError(
+                        f"{direction.case_id} failed for {size} bytes: "
+                        f"expected_sha256={expected_checksum[:12]}, observed_sha256={observed_checksum[:12]}"
+                    )
             else:
                 completed = protocol.receive("TRANSFER_COMPLETE")
                 expected_fields = {
@@ -313,6 +323,7 @@ def execute_transfer_matrix(
                     "payload_bytes": size,
                     "sequence_id": sequence_id,
                     "expected_checksum": expected_checksum,
+                    "transfer_chunks": (size + VALIDATION_P2P_CHUNK_BYTES - 1) // VALIDATION_P2P_CHUNK_BYTES,
                 }
                 if any(completed.get(key) != value for key, value in expected_fields.items()):
                     raise Stage1AError("transfer metadata mismatch")
@@ -363,7 +374,7 @@ def run_endpoint(args: argparse.Namespace) -> int:
     local_window: Any | None = None
     peer_window: Any | None = None
     channel: ControlChannel | None = None
-    observations: tuple[TransferObservation, ...] = ()
+    observations: list[TransferObservation] = []
     sanitized_manifest: dict[str, Any] | None = None
     cleanup: dict[str, str] = {
         "imported_window": "NOT_CREATED",
@@ -400,11 +411,12 @@ def run_endpoint(args: argparse.Namespace) -> int:
             cleanup["imported_window"] = "OPEN"
             protocol.exchange("ATTACHED", {"peer_mapping_bytes": peer_window.mapping_bytes})
             protocol.exchange("READY", {"probe": "T01_T02"})
-            observations = execute_transfer_matrix(
+            execute_transfer_matrix(
                 protocol,
                 runtime=runtime,
                 local_window=local_window,
                 peer_window=peer_window,
+                observation_sink=observations,
             )
             protocol.exchange("DRAIN", {"inflight": 0})
             peer_window.close()
@@ -529,12 +541,39 @@ def _file_evidence(path: Path) -> dict[str, Any] | None:
     return {"bytes": len(payload), "path": path.name, "sha256": hashlib.sha256(payload).hexdigest()}
 
 
+def _device_log_evidence(root: Path) -> dict[str, Any]:
+    files: list[dict[str, Any]] = []
+    p2p_enable_observed = False
+    p2p_memory_released = False
+    if root.is_dir():
+        for path in sorted(item for item in root.rglob("*") if item.is_file()):
+            payload = path.read_bytes()
+            files.append(
+                {
+                    "bytes": len(payload),
+                    "path": str(path.relative_to(root)),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                }
+            )
+            p2p_enable_observed = p2p_enable_observed or b"Enable P2P" in payload
+            p2p_memory_released = p2p_memory_released or (
+                b"P2P_HBM" in payload and b"current_alloced_size=0" in payload
+            )
+    return {
+        "files": files,
+        "p2p_enable_observed": p2p_enable_observed,
+        "p2p_memory_released": p2p_memory_released,
+    }
+
+
 def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole, subprocess.Popen[Any]]):
     endpoints: dict[str, Any] = {}
     observations: list[TransferObservation] = []
     message_counts: Counter[str] = Counter()
     control_bytes = 0
     all_success = True
+    all_cleanup = True
+    driver_proofs: list[bool] = []
     for role, process in processes.items():
         artifact_name = f"{role.value.lower()}_stage1a.json"
         artifact = _read_json(args.artifact_dir / artifact_name)
@@ -542,8 +581,19 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
             artifact = {"success": False}
         endpoint_success = bool(artifact.get("success")) and process.returncode == 0
         all_success = all_success and endpoint_success
+        cleanup = artifact.get("cleanup", {})
+        cleanup_complete = cleanup == {
+            "imported_window": "CLOSED",
+            "owned_window": "CLOSED",
+            "runtime": "CLOSED",
+        }
+        all_cleanup = all_cleanup and cleanup_complete
+        device_logs = _device_log_evidence(args.artifact_dir / f"{role.value.lower()}_device_logs")
+        driver_proofs.append(bool(device_logs["p2p_enable_observed"] and device_logs["p2p_memory_released"]))
         endpoints[role.value] = {
             "artifact": artifact_name,
+            "cleanup": cleanup,
+            "device_logs": device_logs,
             "exit_code": process.returncode,
             "host_log": _file_evidence(args.artifact_dir / f"{role.value.lower()}_stage1a.log"),
             "pid": process.pid,
@@ -555,7 +605,9 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
             message_counts[message_type] += int(count)
         for raw in artifact.get("observations", []):
             observations.append(TransferObservation.from_dict(raw))
-    matrix_complete = all_success and stage1a_matrix_complete(tuple(observations))
+    matrix_complete = (
+        all_success and all_cleanup and all(driver_proofs) and stage1a_matrix_complete(tuple(observations))
+    )
     direction_results: dict[str, Any] = {}
     for direction in TransferDirection:
         selected = [item for item in observations if item.direction is direction]
@@ -588,16 +640,23 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
         "host_verification_bytes": sum(item.host_verification_bytes for item in observations),
         "npu_wse_capability_level": "NOT_ESTABLISHED",
         "profile": "NPU_SURROGATE",
+        "resource_cleanup": "VERIFIED" if all_cleanup else "FAILED",
         "run_id": args.run_id,
         "schema_version": SCHEMA_VERSION,
         "start_order": args.start_order,
         "success": matrix_complete,
         "transfer_api": STAGE1A_TRANSFER_API,
-        "transport_identity_evidence": [
-            "aclrtDeviceEnablePeerAccess returned success",
-            "ACL VMM shareable handle exported and imported",
-            "aclrtMemcpy used ACL_MEMCPY_DEVICE_TO_DEVICE",
-        ],
+        "max_transfer_chunk_bytes": VALIDATION_P2P_CHUNK_BYTES,
+        "transport_identity_evidence": (
+            [
+                "aclrtDeviceEnablePeerAccess returned success",
+                "ACL VMM shareable handle exported and imported",
+                "aclrtMemcpy used ACL_MEMCPY_DEVICE_TO_DEVICE",
+                "driver logs contain Enable P2P and released P2P_HBM counters",
+            ]
+            if matrix_complete
+            else []
+        ),
         "transport_scope": TransportScope.HOST_LOCAL.value,
     }
 

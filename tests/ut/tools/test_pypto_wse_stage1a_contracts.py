@@ -47,6 +47,8 @@ def _observation(direction: TransferDirection, size: int) -> TransferObservation
         source_filled=True,
         destination_verified=True,
         elapsed_ns=1,
+        transfer_chunks=(size + 64 * 1024 - 1) // (64 * 1024),
+        max_transfer_chunk_bytes=min(size, 64 * 1024),
     )
 
 
