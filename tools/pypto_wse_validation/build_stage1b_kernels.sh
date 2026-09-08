@@ -18,6 +18,7 @@ output_dir="$1"
 t04_source="$script_dir/kernels/stage1b_t04.cpp"
 t05_source="$script_dir/kernels/stage1b_t05.cpp"
 t06_source="$script_dir/kernels/stage1b_t06.cpp"
+t07_source="$script_dir/kernels/stage1b_t07.cpp"
 ccec="$ASCEND_HOME_PATH/bin/ccec"
 linker="$ASCEND_HOME_PATH/bin/ld.lld"
 
@@ -70,10 +71,22 @@ common_flags=(
 "$linker" -m aicorelinux -Ttext=0 -static --allow-multiple-definition \
     -o "$output_dir/stage1b_t06_service.o" "$output_dir/stage1b_t06_service_vec.o"
 
+"$ccec" "${common_flags[@]}" -DPYPTO_T07_DRIVER \
+    -o "$output_dir/stage1b_t07_driver_vec.o" "$t07_source"
+"$linker" -m aicorelinux -Ttext=0 -static --allow-multiple-definition \
+    -o "$output_dir/stage1b_t07_driver.o" "$output_dir/stage1b_t07_driver_vec.o"
+
+"$ccec" "${common_flags[@]}" -DPYPTO_T07_SERVICE \
+    -o "$output_dir/stage1b_t07_service_vec.o" "$t07_source"
+"$linker" -m aicorelinux -Ttext=0 -static --allow-multiple-definition \
+    -o "$output_dir/stage1b_t07_service.o" "$output_dir/stage1b_t07_service_vec.o"
+
 sha256sum \
     "$output_dir/stage1b_t04_driver.o" \
     "$output_dir/stage1b_t04_service.o" \
     "$output_dir/stage1b_t05_driver.o" \
     "$output_dir/stage1b_t05_service.o" \
     "$output_dir/stage1b_t06_driver.o" \
-    "$output_dir/stage1b_t06_service.o"
+    "$output_dir/stage1b_t06_service.o" \
+    "$output_dir/stage1b_t07_driver.o" \
+    "$output_dir/stage1b_t07_service.o"
