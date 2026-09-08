@@ -1,8 +1,8 @@
-# PyPTO WSE 阶段 1B T04/T05/T06 验证记录
+# PyPTO WSE 阶段 1B T04～T07 验证记录
 
 ## 1. 结论
 
-阶段 1B 的 T04/T05/T06 已在两张 Ascend950PR 上完成 NPU surrogate 预验证：Attention
+阶段 1B 的 T04～T07 已在两张 Ascend950PR 上完成 NPU surrogate 预验证：Attention
 进程和 WSE surrogate 进程分别绑定 NPU 0/1，各自只启动一次 AIV kernel。两个 kernel
 通过 CANN ACL VMM P2P 映射，在 Device Memory 中完成单 slot 闭环及双 slot 流水验证。
 
@@ -39,8 +39,19 @@ T06 结果：
 - READY 后 Host task、completion、payload 和其他控制消息均为 0，Host bounce 为 0 B。
 - 脱敏证据：[pypto-wse-stage1b-t06-evidence.json](pypto-wse-stage1b-t06-evidence.json)
 
+T07 结果：
+
+- 连续传输 100 个 1 MiB round-trip，交替复用 slot 0/1，每次运行累计双向 200 MiB。
+- 每个 sequence 使用唯一头尾标记；两端各校验 13,107,200 个 64-bit payload word。
+- input payload、descriptor 和 submission，以及 output、completion metadata 和 signal 均使用
+  显式 `st_dev` + `DSB_ALL` 顺序。
+- driver 在 completion signal 后立即校验完整 output，100 次检查的额外等待均为 0 cycle。
+- 两种启动顺序的旧 payload、输入不完整、提前 completion、checksum 和头尾标记错误均为 0。
+- 脱敏证据：[pypto-wse-stage1b-t07-evidence.json](pypto-wse-stage1b-t07-evidence.json)
+
 当前能力结论仍为 **C1（NPU surrogate only）**，`c2_status` 为 `NOT_ESTABLISHED`。
-T04～T06 证明单 slot、双 slot 流水和满队列背压成立；完成 T07～T12 前不能声明达到 C2。
+T04～T07 证明单 slot、双 slot 流水、满队列背压及顺序可见性成立；完成 T08～T12 前不能
+声明达到 C2。
 真实 NPU-WSE 能力仍为 `NOT_ESTABLISHED`，`evidence_status` 仍为 `SIMULATION`。
 
 ## 2. 设备闭环
@@ -80,10 +91,21 @@ credit 判定。credit 为零时，driver 记录 `NO_CREDIT`，保留 sequence 3
 后续 sequence 4 同样等待 slot 1 的 credit。设备报告同时要求满队列深度为 2、背压事件为
 1、提交重试自旋为 0，并在恢复后完成全部 4 个请求。
 
-## 5. 硬件证据
+## 5. 顺序与可见性
 
-T04 最终功能代码 revision 为 `3a2582c5`，T05 为 `b225e1cf`，T06 为 `0badeef2`。
-通过 `task-submit` 锁定 NPU 0/1，三项验证的两种启动顺序均通过：
+T07 使用两个 1 MiB slot，并以 `max_inflight=1` 交替复用。driver 先写完完整 input 和唯一
+头尾标记，再执行 `DSB_ALL`，最后发布 descriptor 和 submission signal。service 收到 signal
+后立即校验 descriptor、完整 payload、checksum 和标记，并显式检查是否混入同一 slot 的
+前一个 sequence。
+
+service 写完完整 output 后执行 `DSB_ALL`，再发布 completion metadata 和 signal。driver
+观察到 signal 后仅执行可见性 fence，不进行 sleep 或定时等待，随即读取 completion 和全部
+1 MiB output。任何不完整 output 都会同时进入 premature completion 和数据错误计数。
+
+## 6. 硬件证据
+
+T04 最终功能代码 revision 为 `3a2582c5`，T05 为 `b225e1cf`，T06 为 `0badeef2`，
+T07 为 `2602dc49`。通过 `task-submit` 锁定 NPU 0/1，四项验证的两种启动顺序均通过：
 
 | task | 启动顺序 | T04 | Driver/Service launch | Host 热路径 | 清理 |
 | --- | --- | --- | --- | --- | --- |
@@ -100,6 +122,11 @@ T04 最终功能代码 revision 为 `3a2582c5`，T05 为 `b225e1cf`，T06 为 `0
 | `task_20260908_165831_811913425` | Attention-first | 4/4 | 5 / 1 / 0 | 4/4 | 通过 |
 | `task_20260908_165931_1548322410` | WSE-first | 4/4 | 5 / 1 / 0 | 4/4 | 通过 |
 
+| task | 启动顺序 | T07 | payload | 立即检查 / 延迟 | Host 热路径 | 清理 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `task_20260908_171913_14417018689` | Attention-first | 100/100 | 1 MiB | 100 / 0 cycle | 全部为 0 | 通过 |
+| `task_20260908_171952_14879930649` | WSE-first | 100/100 | 1 MiB | 100 / 0 cycle | 全部为 0 | 通过 |
+
 WSE-first 运行中，driver 和 service 分别报告约 26.23M 和 25.70M device cycles；Host 观测
 整个 kernel 分别约 26.4 ms 和 25.9 ms。该数据只用于发现明显风险，不是吞吐或时延验收结果。
 
@@ -112,7 +139,10 @@ T05 的 Attention-first driver/service 分别报告约 205.32M/204.27M device cy
 T06 的 Attention-first driver/service 分别报告约 0.86M/0.52M device cycles，WSE-first
 分别约 1.62M/0.53M device cycles。该数据只用于发现明显风险，不是吞吐或时延验收结果。
 
-## 6. 自动门禁
+T07 的 Attention-first driver/service 分别报告约 6.306B/6.293B device cycles，WSE-first
+分别约 6.306B/6.292B device cycles。该数据只用于发现明显风险，不是吞吐或时延验收结果。
+
+## 7. 自动门禁
 
 T04 采用 fail-closed 判定，必须同时满足：
 
@@ -143,5 +173,13 @@ T06 在通用约束之外，还要求：
 - service 必须先观测暂停状态，再恢复消费并完成 4/4 request；
 - acquired、terminal 和 returned credit 均为 4。
 
-离线相关单元测试共 121 项通过，覆盖 Stage 0/1A 回归、AIV binary 生命周期、T04～T06
-契约、结果聚合与证据脱敏。下一步按计划实现 T07 顺序与可见性。
+T07 在通用约束之外，还要求：
+
+- 100 个 1 MiB payload 和 100 个唯一尾标记全部通过；
+- 每端校验的 payload word 必须为 13,107,200；
+- input publish、input visibility check、output publish 各发生 100 次；
+- completion signal 后立即检查 100 次，`post_completion_delay_cycles` 必须为 0；
+- stale payload、incomplete payload 和 premature completion 错误必须为 0。
+
+离线相关单元测试共 136 项通过，覆盖 Stage 0/1A 回归、AIV binary 生命周期、T04～T07
+契约、结果聚合与证据脱敏。下一步按计划实现 T08 Generation 隔离。
