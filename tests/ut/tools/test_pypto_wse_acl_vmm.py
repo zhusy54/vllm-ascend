@@ -47,6 +47,10 @@ class _FakeFunction:
             ctypes.cast(args[0], ctypes.POINTER(ctypes.c_void_p))[0] = 0x4000
         elif self.name == "aclrtMalloc":
             ctypes.cast(args[0], ctypes.POINTER(ctypes.c_void_p))[0] = 0x5000
+        elif self.name == "aclrtBinaryLoadFromData":
+            ctypes.cast(args[3], ctypes.POINTER(ctypes.c_void_p))[0] = 0x9000
+        elif self.name == "aclrtBinaryGetFunctionByEntry":
+            ctypes.cast(args[2], ctypes.POINTER(ctypes.c_void_p))[0] = 0xA000
         return self.owner.results.get(self.name, 0)
 
 
