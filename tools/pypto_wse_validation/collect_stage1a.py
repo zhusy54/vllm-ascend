@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Any
 
 from tools.pypto_wse_validation.contracts import EndpointRole
-from tools.pypto_wse_validation.stage1a_contracts import BASE_PAYLOAD_SIZES, TransferObservation
+from tools.pypto_wse_validation.stage1a_contracts import (
+    BASE_PAYLOAD_SIZES,
+    ROUND_TRIP_CASE_ID,
+    RoundTripObservation,
+    TransferObservation,
+)
 
 SCHEMA_VERSION = 1
 FORBIDDEN_ARTIFACT_KEYS = frozenset({"address", "device_addr", "shareable_handle"})
@@ -58,6 +63,7 @@ def _endpoint_evidence(
         "error": endpoint.get("error"),
         "manifest": endpoint.get("manifest"),
         "observations": endpoint.get("observations", []),
+        "round_trips": endpoint.get("round_trips", []),
         "role": endpoint.get("role"),
         "success": endpoint.get("success"),
     }
@@ -67,6 +73,8 @@ def _endpoint_evidence(
     if validate_observations:
         for raw in evidence["observations"]:
             TransferObservation.from_dict(raw)
+        for raw in evidence["round_trips"]:
+            RoundTripObservation.from_dict(raw)
     return evidence
 
 
@@ -83,6 +91,11 @@ def _validate_success(result: Mapping[str, Any], endpoints: Mapping[str, Mapping
         direction_result = result.get("data_results", {}).get(direction, {})
         if direction_result.get("status") != "PASS" or direction_result.get("passed") != len(BASE_PAYLOAD_SIZES):
             raise ValueError(f"successful run has incomplete direction evidence: {direction}")
+    round_trip_result = result.get("data_results", {}).get(ROUND_TRIP_CASE_ID, {})
+    if round_trip_result.get("status") != "PASS" or round_trip_result.get("passed") != len(BASE_PAYLOAD_SIZES):
+        raise ValueError("successful run has incomplete T03 round-trip evidence")
+    if result.get("host_intermediate_payload_bytes") != 0:
+        raise ValueError("successful run used Host intermediate payload for T03")
     for role in EndpointRole:
         endpoint = endpoints[role.value]
         if endpoint.get("success") is not True or endpoint.get("error") is not None:
@@ -128,7 +141,7 @@ def collect_stage1a(
             "npu_wse_capability_level": "NOT_ESTABLISHED",
             "t01": "PASS",
             "t02": "PASS",
-            "t03": "NOT_RUN",
+            "t03": "PASS",
         },
         "diagnostic_runs": loaded_diagnostics,
         "implementation_revision": implementation_revision,

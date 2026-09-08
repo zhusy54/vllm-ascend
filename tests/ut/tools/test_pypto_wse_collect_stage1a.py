@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from tests.ut.tools.test_pypto_wse_stage1a_contracts import _observation
+from tests.ut.tools.test_pypto_wse_stage1a_roundtrip_contracts import _round_trip
 from tools.pypto_wse_validation.collect_stage1a import collect_stage1a
 from tools.pypto_wse_validation.contracts import EndpointRole
 from tools.pypto_wse_validation.stage1a_contracts import BASE_PAYLOAD_SIZES, TransferDirection
@@ -40,6 +41,11 @@ def _write_run(path: Path, start_order: str, *, raw_handle: bool = False, succes
             "error": None,
             "manifest": manifest,
             "observations": [item.to_dict() for item in observations[role]],
+            "round_trips": (
+                [item.to_dict() for item in (_round_trip(size) for size in BASE_PAYLOAD_SIZES)]
+                if role is EndpointRole.ATTENTION
+                else []
+            ),
             "role": role.value,
             "success": success,
         }
@@ -48,9 +54,14 @@ def _write_run(path: Path, start_order: str, *, raw_handle: bool = False, succes
         "capability_level": "C1" if success else "NONE",
         "claim_scope": "NPU_SURROGATE_ONLY",
         "data_results": {
-            direction.value: {"passed": len(BASE_PAYLOAD_SIZES), "status": "PASS"} for direction in TransferDirection
+            **{
+                direction.value: {"passed": len(BASE_PAYLOAD_SIZES), "status": "PASS"}
+                for direction in TransferDirection
+            },
+            "T03": {"passed": len(BASE_PAYLOAD_SIZES), "status": "PASS"},
         },
         "host_bounce_bytes": 0,
+        "host_intermediate_payload_bytes": 0,
         "npu_wse_capability_level": "NOT_ESTABLISHED",
         "resource_cleanup": "VERIFIED",
         "start_order": start_order,
@@ -79,7 +90,7 @@ def test_collect_requires_two_start_orders_and_preserves_claim_boundary(tmp_path
         "npu_wse_capability_level": "NOT_ESTABLISHED",
         "t01": "PASS",
         "t02": "PASS",
-        "t03": "NOT_RUN",
+        "t03": "PASS",
     }
     assert [item["task_id"] for item in evidence["successful_runs"]] == ["task-a", "task-b"]
 
