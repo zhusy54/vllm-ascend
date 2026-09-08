@@ -81,6 +81,17 @@ def test_control_channel_rejects_oversized_declared_frame() -> None:
         right.close()
 
 
+def test_control_message_rejects_generation_mismatch() -> None:
+    message = make_control_message(
+        "READY",
+        run_id="run-1",
+        generation=1,
+        role=EndpointRole.ATTENTION,
+    )
+    with pytest.raises(BootstrapError, match="generation mismatch"):
+        validate_control_message(message, run_id="run-1", generation=2)
+
+
 def test_contract_only_manifests_are_valid_but_not_runtime_evidence() -> None:
     attention = make_contract_manifest(run_id="run-1", generation=1, role=EndpointRole.ATTENTION, device_id=0)
     surrogate = make_contract_manifest(
@@ -101,6 +112,21 @@ def test_contract_only_manifests_are_valid_but_not_runtime_evidence() -> None:
 @pytest.mark.parametrize("start_order", ("attention-first", "wse-first"))
 def test_launcher_uses_independent_processes_and_both_start_orders(tmp_path: Path, start_order: str) -> None:
     artifact_dir = tmp_path / start_order
+    artifact_dir.mkdir()
+    (artifact_dir / "capabilities.json").write_text(
+        json.dumps(
+            {
+                "capabilities": [
+                    {
+                        "capability": "independent_device_runtime_init",
+                        "evidence": "not run",
+                        "status": "unknown",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
     assert (
         main(
             [
@@ -128,6 +154,8 @@ def test_launcher_uses_independent_processes_and_both_start_orders(tmp_path: Pat
     assert result["capability_level"] == "C0"
     assert result["start_order"] == start_order
     assert result["control_plane"]["message_counts"] == {"HEALTH": 2, "HELLO": 2, "READY": 2, "STOP": 2}
+    assert result["data_results"]["NPU_TO_WSE_SURROGATE"]["status"] == "NOT_EXERCISED"
+    assert result["resource_cleanup"]["runtime_close"] == "VERIFIED"
     assert result["forbidden_hot_path_activity"] == {
         "host_completion_messages": 0,
         "host_payload_bytes": 0,
@@ -142,6 +170,9 @@ def test_launcher_uses_independent_processes_and_both_start_orders(tmp_path: Pat
         {"attempt": "1", "outcome": "CLOSED"},
         {"attempt": "2", "outcome": "CLOSED"},
     ]
+    assert result["endpoints"]["ATTENTION"]["host_log"] is not None
+    capability = _read(artifact_dir / "capabilities.json")["capabilities"][0]
+    assert capability["status"] == "verified"
     assert _read(artifact_dir / "transport.json")["data_plane"] == "NOT_EXERCISED"
 
 

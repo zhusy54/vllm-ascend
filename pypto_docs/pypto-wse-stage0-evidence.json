@@ -1,0 +1,255 @@
+{
+  "capabilities": {
+    "a5_urma": "unsupported: PTO_URMA_SUPPORTED is not defined",
+    "backend_identity_counters": "unknown",
+    "device_memory_allocate_free": "unknown",
+    "device_side_submit_completion": "unknown",
+    "device_visibility": "verified",
+    "export_import_remote_handle": "unknown: implementation found but not executed",
+    "host_tcp_device_memory": "unsupported: host-side session storage",
+    "independent_device_runtime_init": "verified",
+    "memory_register_unregister": "unknown",
+    "npu_to_surrogate_data": "not_exercised",
+    "surrogate_to_npu_data": "not_exercised",
+    "visibility_fence_flush": "unknown"
+  },
+  "conclusion": {
+    "capability_level": "C0",
+    "profile": "NPU_SURROGATE",
+    "stage": 0,
+    "status": "PASS",
+    "transport_scope": "SIMULATION"
+  },
+  "environment": {
+    "cann": "9.2.0",
+    "collected_at": "2026-09-08T03:51:11.422111+00:00",
+    "driver": "25.7.rc1.6",
+    "hardware": {
+      "requested": {
+        "ATTENTION": 0,
+        "WSE_SURROGATE": 1
+      },
+      "requested_devices_healthy": true,
+      "type": "Ascend950PR",
+      "visible_health": {
+        "0": "OK",
+        "1": "OK",
+        "2": "OK",
+        "3": "OK",
+        "4": "Alarm",
+        "5": "Alarm",
+        "6": "Alarm",
+        "7": "Alarm"
+      }
+    },
+    "host_machine": "x86_64",
+    "pypto": "0.2.1",
+    "python": "3.12.3",
+    "simpler": {
+      "code_paths_clean": true,
+      "module_sha256": "b4ea1e2223708a3d9fdaa980bd642bc31edecfaad86c8164bce23f06bec2b5d6",
+      "revision": "407438ef677b9a5787c4d645e8cae4f7d4919d4e",
+      "version": "0.1.0"
+    }
+  },
+  "manifests": {
+    "ATTENTION": {
+      "completion_queue": {
+        "access_flags": 3,
+        "alignment": 4096,
+        "handle_kind": "CONTRACT_ONLY",
+        "opaque_handle": "NOT_BOUND_STAGE0",
+        "size_bytes": 80
+      },
+      "device_id": 0,
+      "endpoint_id": "attention",
+      "exported_windows": [
+        "output_window",
+        "completion_queue"
+      ],
+      "output_window": {
+        "access_flags": 3,
+        "alignment": 4096,
+        "handle_kind": "CONTRACT_ONLY",
+        "opaque_handle": "NOT_BOUND_STAGE0",
+        "size_bytes": 1048576
+      }
+    },
+    "WSE_SURROGATE": {
+      "device_id": 1,
+      "endpoint_id": "wse-surrogate",
+      "exported_windows": [
+        "input_window",
+        "submission_queue"
+      ],
+      "input_window": {
+        "access_flags": 3,
+        "alignment": 4096,
+        "handle_kind": "CONTRACT_ONLY",
+        "opaque_handle": "NOT_BOUND_STAGE0",
+        "size_bytes": 1048576
+      },
+      "submission_queue": {
+        "access_flags": 3,
+        "alignment": 4096,
+        "handle_kind": "CONTRACT_ONLY",
+        "opaque_handle": "NOT_BOUND_STAGE0",
+        "size_bytes": 96
+      }
+    },
+    "common": {
+      "evidence_status": "CONTRACT_ONLY",
+      "generation": 1,
+      "layout_hash": "80e907e1751ad1a0592a58477ac2e7522729ac8ac1b7d0c70637a8e2dbcfdd68",
+      "max_inflight": 2,
+      "protocol_version": 1,
+      "runtime_bound": false,
+      "slot_bytes": 1048576,
+      "slot_count": 2,
+      "transport_kind": "stage0-control-only",
+      "transport_scope": "SIMULATION"
+    }
+  },
+  "observations": [
+    "Raw CANN logs are represented by SHA-256 and byte counts; they are not committed.",
+    "CANN logs contain warnings and an ERROR-level successful dispatcher SO write, while all endpoint and task exits are zero.",
+    "No data window was allocated or bound; contract-only handles are not runtime data-plane evidence."
+  ],
+  "runs": [
+    {
+      "control_plane": {
+        "bytes_on_wire": 1385,
+        "message_counts": {
+          "HEALTH": 2,
+          "HELLO": 2,
+          "READY": 2,
+          "STOP": 2
+        },
+        "transport": "TCP_LOOPBACK"
+      },
+      "data_plane": "NOT_EXERCISED",
+      "endpoints": {
+        "ATTENTION": {
+          "device_id": 0,
+          "device_log_bytes": 34219,
+          "device_log_sha256": [
+            "7160a7bfb2fdb746e7073233cdb6b19df7168456c0ff354ee08f5323fa7ee0eb",
+            "2a4ddbbf0a0f422c06278da8830d7b6414a9ee2ad57e67cbf1766060f693882f",
+            "e3a2433a03c3e9ac33fa71c7f0b82c7259e01e75291cbce95bc76da5aeb89254",
+            "69f1ae72b6ceea7a330089694031873a2891618094b5424f8abd74ef70251a82"
+          ],
+          "exit_code": 0,
+          "host_log_sha256": "d62e6a6f29394d287fa846de99112e4e605b6b5dea180c705c46e9ac2f447079",
+          "pid": 2302638,
+          "runtime_close_attempts": [
+            "CLOSED",
+            "CLOSED"
+          ],
+          "runtime_initialized": true
+        },
+        "WSE_SURROGATE": {
+          "device_id": 1,
+          "device_log_bytes": 34574,
+          "device_log_sha256": [
+            "ecc7696b8132d4b65878a52f19233928888ba2183a235f2f61e29a2eed31a2c3",
+            "9a071616778292d60df7bd51311c86b306782a13505464c49b6f62a0bbf79cb4",
+            "4a1f7d46c2c7921524216cf31c2ffbd73d667ea36c5b0419c0884bb0e0f74163",
+            "842ff63a5a805feed50379e26e23451706c327ab2a9c6dfdc27c1e30a5c9a69d"
+          ],
+          "exit_code": 0,
+          "host_log_sha256": "4dddf25bf9c0cc8c0941078d827d71a624ed1a4d85c1aa3ad8d273dc7ceee32a",
+          "pid": 2302683,
+          "runtime_close_attempts": [
+            "CLOSED",
+            "CLOSED"
+          ],
+          "runtime_initialized": true
+        }
+      },
+      "forbidden_hot_path_activity": {
+        "host_completion_messages": 0,
+        "host_payload_bytes": 0,
+        "host_task_messages": 0
+      },
+      "run_id": "stage0-0b040971d10142d3b940c789dc49ed90",
+      "start_order": "attention-first",
+      "success": true,
+      "task_submit_id": "task_20260908_115135_230250028101"
+    },
+    {
+      "control_plane": {
+        "bytes_on_wire": 1385,
+        "message_counts": {
+          "HEALTH": 2,
+          "HELLO": 2,
+          "READY": 2,
+          "STOP": 2
+        },
+        "transport": "TCP_LOOPBACK"
+      },
+      "data_plane": "NOT_EXERCISED",
+      "endpoints": {
+        "ATTENTION": {
+          "device_id": 0,
+          "device_log_bytes": 33870,
+          "device_log_sha256": [
+            "da8e5ccf593bf0e12465925cec7bebe583a79ffe4c0c7406fe076b074442ddf9",
+            "9da59341929339d0db909a04ce349f28455999884ef967c77e7e0bb904421c75",
+            "ce881ab8e185b2bf01dba6dbe47f723e762f6cc0cbca5e203f84aafeb7edd449",
+            "43b61825022d090b5d5150a168a02f7a5002bd450e090eab508b3f366f847fd6"
+          ],
+          "exit_code": 0,
+          "host_log_sha256": "49f62763bd5e9d0ad07c62381bdf383cba3d45c2ec55351af4143e0b2cd9a4be",
+          "pid": 2308046,
+          "runtime_close_attempts": [
+            "CLOSED",
+            "CLOSED"
+          ],
+          "runtime_initialized": true
+        },
+        "WSE_SURROGATE": {
+          "device_id": 1,
+          "device_log_bytes": 34574,
+          "device_log_sha256": [
+            "bcb4996204b8f95ea5dd27941ae99308e5f299eafd61ed02a86a2ace9e0ab328",
+            "e33a5e94eea5a7925b261f51f727172adf8326b5f617ce9ede9a80de03729c75",
+            "89de17d0673765eb7bbdbdfa2bb62ddfa4e241c68ee8510a8366a5e9f04fb827",
+            "2e033b859bb13333c450bf89b97afd205054f5e7c20ff44ace7d98561cf065f5"
+          ],
+          "exit_code": 0,
+          "host_log_sha256": "cfe4dd2c7c6d46eba9a1abea0b6107395ab37463a2ed720c46bb75885621a4e4",
+          "pid": 2308012,
+          "runtime_close_attempts": [
+            "CLOSED",
+            "CLOSED"
+          ],
+          "runtime_initialized": true
+        }
+      },
+      "forbidden_hot_path_activity": {
+        "host_completion_messages": 0,
+        "host_payload_bytes": 0,
+        "host_task_messages": 0
+      },
+      "run_id": "stage0-3ec68fe3e03b4efbb4be2e861a7afbf5",
+      "start_order": "wse-first",
+      "success": true,
+      "task_submit_id": "task_20260908_115201_23078678173"
+    }
+  ],
+  "schema_version": 1,
+  "transport": {
+    "actual_backend": "CONTROL_ONLY",
+    "control_plane": "TCP_LOOPBACK",
+    "data_plane": "NOT_EXERCISED",
+    "declared_scope": "SIMULATION",
+    "local_fallback_allowed": false,
+    "source_signals": {
+      "a5_vmm_export_import_present": true,
+      "host_tcp_profile_present": true,
+      "remote_buffer_api_present": true,
+      "urma_capability_defined": false,
+      "urma_code_present": true
+    }
+  }
+}

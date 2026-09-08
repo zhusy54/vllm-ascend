@@ -338,6 +338,55 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _log_inventory(root: Path) -> list[dict[str, Any]]:
+    if not root.is_dir():
+        return []
+    inventory: list[dict[str, Any]] = []
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        payload = path.read_bytes()
+        inventory.append(
+            {
+                "bytes": len(payload),
+                "path": str(path.relative_to(root)),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    return inventory
+
+
+def _file_evidence(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = path.read_bytes()
+    except OSError:
+        return None
+    return {
+        "bytes": len(payload),
+        "path": path.name,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def _update_capability_evidence(artifact_dir: Path, success: bool) -> None:
+    path = artifact_dir / "capabilities.json"
+    capabilities = _read_json(path)
+    if capabilities is None or not isinstance(capabilities.get("capabilities"), list):
+        return
+    for capability in capabilities["capabilities"]:
+        if capability.get("capability") == "independent_device_runtime_init":
+            capability.update(
+                {
+                    "evidence": (
+                        "two independent Simpler L2 endpoint processes initialized distinct NPUs and closed twice"
+                        if success
+                        else "two-process runtime bootstrap did not complete successfully"
+                    ),
+                    "status": "verified" if success else "failed",
+                }
+            )
+            break
+    _write_json(path, capabilities)
+
+
 def _aggregate_result(args: argparse.Namespace, processes: dict[EndpointRole, subprocess.Popen[Any]]) -> dict[str, Any]:
     endpoints: dict[str, Any] = {}
     message_counts: Counter[str] = Counter()
@@ -349,7 +398,9 @@ def _aggregate_result(args: argparse.Namespace, processes: dict[EndpointRole, su
             artifact = {"error": {"message": "endpoint artifact missing", "type": "ArtifactError"}, "success": False}
         endpoints[role.value] = {
             "artifact": f"{role.value.lower()}_endpoint.json",
+            "device_logs": _log_inventory(args.artifact_dir / f"{role.value.lower()}_device_logs"),
             "exit_code": process.returncode,
+            "host_log": _file_evidence(args.artifact_dir / f"{role.value.lower()}_host.log"),
             "pid": process.pid,
             "success": bool(artifact.get("success")) and process.returncode == 0,
         }
@@ -369,6 +420,10 @@ def _aggregate_result(args: argparse.Namespace, processes: dict[EndpointRole, su
             "transport": "TCP_LOOPBACK",
         },
         "data_plane": "NOT_EXERCISED",
+        "data_results": {
+            "NPU_TO_WSE_SURROGATE": {"attempts": 0, "bytes": 0, "status": "NOT_EXERCISED"},
+            "WSE_SURROGATE_TO_NPU": {"attempts": 0, "bytes": 0, "status": "NOT_EXERCISED"},
+        },
         "devices": {
             "ATTENTION": args.devices[0],
             "WSE_SURROGATE": args.devices[1],
@@ -381,6 +436,10 @@ def _aggregate_result(args: argparse.Namespace, processes: dict[EndpointRole, su
         },
         "generation": args.generation,
         "profile": "NPU_SURROGATE",
+        "resource_cleanup": {
+            "device_memory_windows": "NOT_ALLOCATED_STAGE0",
+            "runtime_close": "VERIFIED" if all_success else "FAILED",
+        },
         "run_id": args.run_id,
         "schema_version": SCHEMA_VERSION,
         "start_order": args.start_order,
@@ -456,6 +515,7 @@ def run_launcher(args: argparse.Namespace) -> int:
         )
     result = _aggregate_result(args, processes)
     _write_json(args.artifact_dir / "result.json", result)
+    _update_capability_evidence(args.artifact_dir, bool(result["success"]))
     transport_path = args.artifact_dir / "transport.json"
     transport = _read_json(transport_path) or {"profile": "NPU_SURROGATE", "schema_version": SCHEMA_VERSION}
     transport.update(
