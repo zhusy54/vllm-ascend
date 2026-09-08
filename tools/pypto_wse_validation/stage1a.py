@@ -65,6 +65,7 @@ ALLOWED_MESSAGE_TYPES = frozenset(
         "DRAIN",
         "DETACHED",
         "RELEASED",
+        "PROBE_RESULT",
         "ROUND_TRIP_FORWARD",
         "ROUND_TRIP_RETURN",
         "ROUND_TRIP_VERIFIED",
