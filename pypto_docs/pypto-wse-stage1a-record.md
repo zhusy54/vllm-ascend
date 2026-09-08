@@ -85,6 +85,6 @@ C1 surrogate 结论采用 fail-closed 判定，必须同时满足：
 - Attention-first 与 WSE-first 至少各有一次成功运行；
 - artifact 不包含 raw shareable handle 或设备地址。
 
-离线单元测试共 72 项覆盖阶段 0 回归、ACL ABI/VMM 生命周期、双端协议、T03 设备变换、
-证据契约和脱敏汇聚。Stage 1A 已结束；下一步按计划进入 T04/T07，验证受控 fault injection、
-generation 隔离与 fail-fast 行为。
+离线单元测试覆盖阶段 0 回归、ACL ABI/VMM 生命周期、双端协议、T03 设备变换、证据契约
+和脱敏汇聚。Stage 1A 已结束；后续 T04 设备闭环结果见
+[pypto-wse-stage1b-record.md](pypto-wse-stage1b-record.md)。
