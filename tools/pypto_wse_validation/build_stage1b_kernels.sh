@@ -15,7 +15,8 @@ fi
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 output_dir="$1"
-source_file="$script_dir/kernels/stage1b_t04.cpp"
+t04_source="$script_dir/kernels/stage1b_t04.cpp"
+t05_source="$script_dir/kernels/stage1b_t05.cpp"
 ccec="$ASCEND_HOME_PATH/bin/ccec"
 linker="$ASCEND_HOME_PATH/bin/ld.lld"
 
@@ -39,13 +40,27 @@ common_flags=(
 )
 
 "$ccec" "${common_flags[@]}" -DPYPTO_T04_DRIVER \
-    -o "$output_dir/stage1b_t04_driver_vec.o" "$source_file"
+    -o "$output_dir/stage1b_t04_driver_vec.o" "$t04_source"
 "$linker" -m aicorelinux -Ttext=0 -static --allow-multiple-definition \
     -o "$output_dir/stage1b_t04_driver.o" "$output_dir/stage1b_t04_driver_vec.o"
 
 "$ccec" "${common_flags[@]}" -DPYPTO_T04_SERVICE \
-    -o "$output_dir/stage1b_t04_service_vec.o" "$source_file"
+    -o "$output_dir/stage1b_t04_service_vec.o" "$t04_source"
 "$linker" -m aicorelinux -Ttext=0 -static --allow-multiple-definition \
     -o "$output_dir/stage1b_t04_service.o" "$output_dir/stage1b_t04_service_vec.o"
 
-sha256sum "$output_dir/stage1b_t04_driver.o" "$output_dir/stage1b_t04_service.o"
+"$ccec" "${common_flags[@]}" -DPYPTO_T05_DRIVER \
+    -o "$output_dir/stage1b_t05_driver_vec.o" "$t05_source"
+"$linker" -m aicorelinux -Ttext=0 -static --allow-multiple-definition \
+    -o "$output_dir/stage1b_t05_driver.o" "$output_dir/stage1b_t05_driver_vec.o"
+
+"$ccec" "${common_flags[@]}" -DPYPTO_T05_SERVICE \
+    -o "$output_dir/stage1b_t05_service_vec.o" "$t05_source"
+"$linker" -m aicorelinux -Ttext=0 -static --allow-multiple-definition \
+    -o "$output_dir/stage1b_t05_service.o" "$output_dir/stage1b_t05_service_vec.o"
+
+sha256sum \
+    "$output_dir/stage1b_t04_driver.o" \
+    "$output_dir/stage1b_t04_service.o" \
+    "$output_dir/stage1b_t05_driver.o" \
+    "$output_dir/stage1b_t05_service.o"
