@@ -1,10 +1,10 @@
-# PyPTO WSE 阶段 1B T04～T07 验证记录
+# PyPTO WSE 阶段 1B T04～T08 验证记录
 
 ## 1. 结论
 
-阶段 1B 的 T04～T07 已在两张 Ascend950PR 上完成 NPU surrogate 预验证：Attention
-进程和 WSE surrogate 进程分别绑定 NPU 0/1，各自只启动一次 AIV kernel。两个 kernel
-通过 CANN ACL VMM P2P 映射，在 Device Memory 中完成单 slot 闭环及双 slot 流水验证。
+阶段 1B 的 T04～T08 已在两张 Ascend950PR 上完成 NPU surrogate 预验证：Attention
+进程和 WSE surrogate 进程分别绑定 NPU 0/1，每个 generation 各自只启动一次 AIV kernel。
+两个 kernel 通过 CANN ACL VMM P2P 映射，在 Device Memory 中完成单 slot 闭环及双 slot 流水验证。
 
 T04 结果：
 
@@ -49,8 +49,21 @@ T07 结果：
 - 两种启动顺序的旧 payload、输入不完整、提前 completion、checksum 和头尾标记错误均为 0。
 - 脱敏证据：[pypto-wse-stage1b-t07-evidence.json](pypto-wse-stage1b-t07-evidence.json)
 
+T08 结果：
+
+- generation G 完成 4/4 请求后，两端依次关闭 kernel、导入 window、自有 window 和 ACL runtime。
+- 双方确认 G 代资源释放后才创建 G+1；两端旧 peer handle 在重分配前后各探测一次，
+  4/4 次均被 `aclrtMemImportFromShareableHandle` 以错误码 `507899` 拒绝。
+- G+1 的正常请求先占用唯一 credit，随后注入 G 代 descriptor；service 拒绝旧 descriptor，
+  并在正常 completion 前注入 G 代 completion。
+- driver 拒绝旧 completion，未归还 credit，且确认 G+1 slot 保持占用；随后正常请求完成，
+  `old_completion_credit_releases=0`、`progress_after_stale=1`。
+- 两端新旧 opaque handle 均不同，handle collision 和意外导入成功均为 0。
+- 两种启动顺序的 5/5 正常请求、旧代隔离、Host 零热路径及双代资源清理均通过。
+- 脱敏证据：[pypto-wse-stage1b-t08-evidence.json](pypto-wse-stage1b-t08-evidence.json)
+
 当前能力结论仍为 **C1（NPU surrogate only）**，`c2_status` 为 `NOT_ESTABLISHED`。
-T04～T07 证明单 slot、双 slot 流水、满队列背压及顺序可见性成立；完成 T08～T12 前不能
+T04～T08 证明单 slot、双 slot 流水、满队列背压、顺序可见性及 generation 隔离成立；完成 T09～T12 前不能
 声明达到 C2。
 真实 NPU-WSE 能力仍为 `NOT_ESTABLISHED`，`evidence_status` 仍为 `SIMULATION`。
 
@@ -102,10 +115,24 @@ service 写完完整 output 后执行 `DSB_ALL`，再发布 completion metadata 
 观察到 signal 后仅执行可见性 fence，不进行 sleep 或定时等待，随即读取 completion 和全部
 1 MiB output。任何不完整 output 都会同时进入 premature completion 和数据错误计数。
 
-## 6. 硬件证据
+## 6. Generation 隔离
+
+T08 使用连续的 G/G+1 两代独立 VMM 资源和两轮 AIV kernel。G 代完成并 drain 后，两端先
+解除 peer 映射、释放自有 window 并关闭 ACL runtime，再通过控制面互相确认资源已关闭。
+G+1 runtime 随后直接尝试导入旧 peer handle，要求 CANN 拒绝；新 window 分配并交换 manifest
+后再次尝试旧 handle，以覆盖资源重用造成的 ABA 风险。证据只记录错误码和 opaque SHA-256，
+不记录 raw shareable handle 或设备地址。
+
+G+1 driver 先发布正常请求，使单 slot、单 credit 处于占用状态，然后向独立 stale lane 发布
+G 代 descriptor。service 看到正常请求但暂不处理，先拒绝旧 descriptor，并向 driver 的 stale
+lane 发布 G 代 completion。driver 在正常 completion 尚未出现时拒绝旧 completion，确认 credit
+仍为 0、当前 slot 未被释放，再向 service 确认；service 此后才处理正常请求。最终正常请求继续
+完成，证明旧 completion 不会释放新 slot 或阻断 G+1 进展。
+
+## 7. 硬件证据
 
 T04 最终功能代码 revision 为 `3a2582c5`，T05 为 `b225e1cf`，T06 为 `0badeef2`，
-T07 为 `2602dc49`。通过 `task-submit` 锁定 NPU 0/1，四项验证的两种启动顺序均通过：
+T07 为 `2602dc49`，T08 为 `5787f66a`。通过 `task-submit` 锁定 NPU 0/1，五项验证的两种启动顺序均通过：
 
 | task | 启动顺序 | T04 | Driver/Service launch | Host 热路径 | 清理 |
 | --- | --- | --- | --- | --- | --- |
@@ -127,6 +154,11 @@ T07 为 `2602dc49`。通过 `task-submit` 锁定 NPU 0/1，四项验证的两种
 | `task_20260908_171913_14417018689` | Attention-first | 100/100 | 1 MiB | 100 / 0 cycle | 全部为 0 | 通过 |
 | `task_20260908_171952_14879930649` | WSE-first | 100/100 | 1 MiB | 100 / 0 cycle | 全部为 0 | 通过 |
 
+| task | 启动顺序 | T08 | 旧 handle 拒绝（前/后） | 旧 descriptor/completion | 信用误释放 | 清理 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `task_20260908_175522_39823812451` | Attention-first | 5/5 | 2/2 | 1/1 均拒绝 | 0 | 通过 |
+| `task_20260908_175612_40680326335` | WSE-first | 5/5 | 2/2 | 1/1 均拒绝 | 0 | 通过 |
+
 WSE-first 运行中，driver 和 service 分别报告约 26.23M 和 25.70M device cycles；Host 观测
 整个 kernel 分别约 26.4 ms 和 25.9 ms。该数据只用于发现明显风险，不是吞吐或时延验收结果。
 
@@ -142,7 +174,11 @@ T06 的 Attention-first driver/service 分别报告约 0.86M/0.52M device cycles
 T07 的 Attention-first driver/service 分别报告约 6.306B/6.293B device cycles，WSE-first
 分别约 6.306B/6.292B device cycles。该数据只用于发现明显风险，不是吞吐或时延验收结果。
 
-## 7. 自动门禁
+T08 的每次运行包含 G/G+1 两轮 kernel。Attention-first 的 driver/service 合计约
+1.36M/5.57M device cycles，WSE-first 合计约 4.53M/1.69M device cycles。该数据只用于发现
+明显风险，不是吞吐或时延验收结果。
+
+## 8. 自动门禁
 
 T04 采用 fail-closed 判定，必须同时满足：
 
@@ -181,5 +217,15 @@ T07 在通用约束之外，还要求：
 - completion signal 后立即检查 100 次，`post_completion_delay_cycles` 必须为 0；
 - stale payload、incomplete payload 和 premature completion 错误必须为 0。
 
-离线相关单元测试共 136 项通过，覆盖 Stage 0/1A 回归、AIV binary 生命周期、T04～T07
-契约、结果聚合与证据脱敏。下一步按计划实现 T08 Generation 隔离。
+T08 在通用约束之外，还要求：
+
+- G 代必须完成 4/4 请求并完整关闭资源，G+1 必须使用重新分配的 window 和新 runtime；
+- 两端旧 peer handle 在 G+1 重分配前后各导入一次，4 次探测必须全部失败；
+- 两端新旧 local/peer opaque handle 不得碰撞，旧 handle 意外导入成功次数必须为 0；
+- G+1 必须各注入并拒绝一个 G 代 descriptor 和 completion；
+- 旧 completion 不得归还当前 credit，driver/service 都必须确认当前 slot 保持占用；
+- 拒绝旧流量后 G+1 正常请求必须继续完成，所有 generation、sequence 和数据错误必须为 0；
+- 每端只允许每代一次 kernel launch，共两次，双代全部资源必须关闭。
+
+离线相关单元测试共 156 项通过，覆盖 Stage 0/1A 回归、AIV binary 生命周期、T04～T08
+契约、结果聚合与证据脱敏。下一步按计划实现 T09 超时状态机。

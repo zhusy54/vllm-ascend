@@ -1,0 +1,1340 @@
+{
+  "collected_at": "2026-09-08T09:56:45.281136+00:00",
+  "conclusion": {
+    "c2_status": "NOT_ESTABLISHED",
+    "capability_level": "C1",
+    "claim_scope": "NPU_SURROGATE_ONLY",
+    "evidence_status": "SIMULATION",
+    "npu_wse_capability_level": "NOT_ESTABLISHED",
+    "t08": "PASS",
+    "t09_t12": "NOT_RUN",
+    "validated_case": "T08"
+  },
+  "implementation_revision": "5787f66a",
+  "profile": "NPU_SURROGATE",
+  "schema_version": 1,
+  "successful_runs": [
+    {
+      "endpoints": {
+        "ATTENTION": {
+          "cleanup": {
+            "baseline": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "next": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            }
+          },
+          "control": {
+            "received_bytes": 2891,
+            "received_messages": {
+              "ATTACHED": 2,
+              "DETACHED": 2,
+              "DRAIN": 2,
+              "MANIFEST": 2,
+              "PROBE_RESULT": 2,
+              "READY": 2,
+              "RELEASED": 2
+            },
+            "sent_bytes": 2835,
+            "sent_messages": {
+              "ATTACHED": 2,
+              "DETACHED": 2,
+              "DRAIN": 2,
+              "MANIFEST": 2,
+              "PROBE_RESULT": 2,
+              "READY": 2,
+              "RELEASED": 2
+            }
+          },
+          "device_id": 0,
+          "device_loop": null,
+          "error": null,
+          "generation_runs": [
+            {
+              "binary_sha256": "045dd9363fa42351dccdad76474b8bd48ea328fe478b378948042102d38e3077",
+              "elapsed_ns": 1210677,
+              "generation": 1,
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1b_t08_driver_0_mix_aiv",
+              "launches": 1,
+              "mode": 0,
+              "report": {
+                "checksum_errors": 0,
+                "completions": 4,
+                "credits_acquired": 4,
+                "credits_returned": 4,
+                "current_slot_preserved": 0,
+                "elapsed_cycles": 1076260,
+                "generation_errors": 0,
+                "input_fences": 4,
+                "marker_errors": 0,
+                "mode": 0,
+                "old_completion_credit_releases": 0,
+                "output_fences": 0,
+                "processed": 4,
+                "progress_after_stale": 0,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "stale_completion_injections": 0,
+                "stale_completion_rejections": 0,
+                "stale_descriptor_injections": 0,
+                "stale_descriptor_rejections": 0,
+                "submissions": 4,
+                "terminal_tasks": 4,
+                "timeouts": 0,
+                "validation_errors": 0
+              }
+            },
+            {
+              "binary_sha256": "045dd9363fa42351dccdad76474b8bd48ea328fe478b378948042102d38e3077",
+              "elapsed_ns": 433521,
+              "generation": 2,
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1b_t08_driver_0_mix_aiv",
+              "launches": 1,
+              "mode": 1,
+              "report": {
+                "checksum_errors": 0,
+                "completions": 1,
+                "credits_acquired": 1,
+                "credits_returned": 1,
+                "current_slot_preserved": 1,
+                "elapsed_cycles": 279356,
+                "generation_errors": 0,
+                "input_fences": 1,
+                "marker_errors": 0,
+                "mode": 1,
+                "old_completion_credit_releases": 0,
+                "output_fences": 0,
+                "processed": 1,
+                "progress_after_stale": 1,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "stale_completion_injections": 0,
+                "stale_completion_rejections": 1,
+                "stale_descriptor_injections": 1,
+                "stale_descriptor_rejections": 0,
+                "submissions": 1,
+                "terminal_tasks": 1,
+                "timeouts": 0,
+                "validation_errors": 0
+              }
+            }
+          ],
+          "handle_invalidation": {
+            "after_reallocate": {
+              "api": "aclrtMemImportFromShareableHandle",
+              "rejected": true,
+              "result_code": 507899
+            },
+            "api": "aclrtMemImportFromShareableHandle",
+            "before_reallocate": {
+              "api": "aclrtMemImportFromShareableHandle",
+              "rejected": true,
+              "result_code": 507899
+            },
+            "local_handle_changed": true,
+            "new_local_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "bc2646121f138d4160b7e716f5c0f7c258cb80543b9d5531ea159b3325a7b358"
+            },
+            "new_peer_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "076dbb233ae01b4590026d10fac48cd05e1c7a4fe8ed1d48fc3695f47f2be1cc"
+            },
+            "old_local_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "4ee6e5b27e8d485532738b153664f6486a78ab8817908fa29fb8beb168685ea7"
+            },
+            "old_peer_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "8284dffe6322228c196dc9fddbe9609983b4c8472175c3a042f079f3268bf2a7"
+            },
+            "peer_handle_changed": true
+          },
+          "manifest": null,
+          "manifests": [
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 0,
+              "generation": 1,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1049088,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "4ee6e5b27e8d485532738b153664f6486a78ab8817908fa29fb8beb168685ea7"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 0,
+              "generation": 2,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1049088,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "bc2646121f138d4160b7e716f5c0f7c258cb80543b9d5531ea159b3325a7b358"
+              },
+              "transport_scope": "HOST_LOCAL"
+            }
+          ],
+          "role": "ATTENTION",
+          "success": true
+        },
+        "WSE_SURROGATE": {
+          "cleanup": {
+            "baseline": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "next": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            }
+          },
+          "control": {
+            "received_bytes": 2835,
+            "received_messages": {
+              "ATTACHED": 2,
+              "DETACHED": 2,
+              "DRAIN": 2,
+              "MANIFEST": 2,
+              "PROBE_RESULT": 2,
+              "READY": 2,
+              "RELEASED": 2
+            },
+            "sent_bytes": 2891,
+            "sent_messages": {
+              "ATTACHED": 2,
+              "DETACHED": 2,
+              "DRAIN": 2,
+              "MANIFEST": 2,
+              "PROBE_RESULT": 2,
+              "READY": 2,
+              "RELEASED": 2
+            }
+          },
+          "device_id": 1,
+          "device_loop": null,
+          "error": null,
+          "generation_runs": [
+            {
+              "binary_sha256": "b56f4c02305b72507c698b4232877078effcccc667925eb5dcac43e2746ab1af",
+              "elapsed_ns": 1988525,
+              "generation": 1,
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1b_t08_service_0_mix_aiv",
+              "launches": 1,
+              "mode": 0,
+              "report": {
+                "checksum_errors": 0,
+                "completions": 4,
+                "credits_acquired": 0,
+                "credits_returned": 0,
+                "current_slot_preserved": 0,
+                "elapsed_cycles": 1920882,
+                "generation_errors": 0,
+                "input_fences": 0,
+                "marker_errors": 0,
+                "mode": 0,
+                "old_completion_credit_releases": 0,
+                "output_fences": 4,
+                "processed": 4,
+                "progress_after_stale": 0,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "stale_completion_injections": 0,
+                "stale_completion_rejections": 0,
+                "stale_descriptor_injections": 0,
+                "stale_descriptor_rejections": 0,
+                "submissions": 4,
+                "terminal_tasks": 4,
+                "timeouts": 0,
+                "validation_errors": 0
+              }
+            },
+            {
+              "binary_sha256": "b56f4c02305b72507c698b4232877078effcccc667925eb5dcac43e2746ab1af",
+              "elapsed_ns": 3811462,
+              "generation": 2,
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1b_t08_service_0_mix_aiv",
+              "launches": 1,
+              "mode": 1,
+              "report": {
+                "checksum_errors": 0,
+                "completions": 1,
+                "credits_acquired": 0,
+                "credits_returned": 0,
+                "current_slot_preserved": 1,
+                "elapsed_cycles": 3645194,
+                "generation_errors": 0,
+                "input_fences": 0,
+                "marker_errors": 0,
+                "mode": 1,
+                "old_completion_credit_releases": 0,
+                "output_fences": 1,
+                "processed": 1,
+                "progress_after_stale": 1,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "stale_completion_injections": 1,
+                "stale_completion_rejections": 0,
+                "stale_descriptor_injections": 0,
+                "stale_descriptor_rejections": 1,
+                "submissions": 1,
+                "terminal_tasks": 1,
+                "timeouts": 0,
+                "validation_errors": 0
+              }
+            }
+          ],
+          "handle_invalidation": {
+            "after_reallocate": {
+              "api": "aclrtMemImportFromShareableHandle",
+              "rejected": true,
+              "result_code": 507899
+            },
+            "api": "aclrtMemImportFromShareableHandle",
+            "before_reallocate": {
+              "api": "aclrtMemImportFromShareableHandle",
+              "rejected": true,
+              "result_code": 507899
+            },
+            "local_handle_changed": true,
+            "new_local_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "076dbb233ae01b4590026d10fac48cd05e1c7a4fe8ed1d48fc3695f47f2be1cc"
+            },
+            "new_peer_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "bc2646121f138d4160b7e716f5c0f7c258cb80543b9d5531ea159b3325a7b358"
+            },
+            "old_local_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "8284dffe6322228c196dc9fddbe9609983b4c8472175c3a042f079f3268bf2a7"
+            },
+            "old_peer_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "4ee6e5b27e8d485532738b153664f6486a78ab8817908fa29fb8beb168685ea7"
+            },
+            "peer_handle_changed": true
+          },
+          "manifest": null,
+          "manifests": [
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 1,
+              "generation": 1,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1049088,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "8284dffe6322228c196dc9fddbe9609983b4c8472175c3a042f079f3268bf2a7"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 1,
+              "generation": 2,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1049088,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "076dbb233ae01b4590026d10fac48cd05e1c7a4fe8ed1d48fc3695f47f2be1cc"
+              },
+              "transport_scope": "HOST_LOCAL"
+            }
+          ],
+          "role": "WSE_SURROGATE",
+          "success": true
+        }
+      },
+      "result": {
+        "actual_backend": "cann_acl_vmm_p2p",
+        "c2_status": "NOT_ESTABLISHED",
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "completed_at": "2026-09-08T09:55:37.614440+00:00",
+        "data_results": {
+          "T08": {
+            "attempts": 5,
+            "bytes": 40960,
+            "passed": 5,
+            "status": "PASS"
+          }
+        },
+        "devices": {
+          "ATTENTION": 0,
+          "WSE_SURROGATE": 1
+        },
+        "endpoints": {
+          "ATTENTION": {
+            "artifact": "attention_stage1b.json",
+            "cleanup": {
+              "baseline": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "next": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              }
+            },
+            "device_logs": {
+              "files": [
+                {
+                  "bytes": 2442,
+                  "path": "debug/plog/plog-398384_20260908175532226.log",
+                  "sha256": "1706c540a0c35fc47ef0de29ec4843a8a2a39acae6e5dc12ce8eca715d093dfd"
+                },
+                {
+                  "bytes": 21842,
+                  "path": "run/device-0/device-398384_20260908175528092.log",
+                  "sha256": "debc93294ffcdbec0b17dbe5313ae8c9b54c334fc3e036a614f940c4038045c5"
+                },
+                {
+                  "bytes": 67995,
+                  "path": "run/plog/plog-398384_20260908175523401.log",
+                  "sha256": "644752f1973d10ff1db7e57821b08e3f482f83a66cbe51db499748280d5b2a70"
+                }
+              ],
+              "p2p_enable_observed": true,
+              "p2p_memory_released": true
+            },
+            "exit_code": 0,
+            "host_log": {
+              "bytes": 0,
+              "path": "attention_stage1b.log",
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "pid": 398384,
+            "success": true
+          },
+          "WSE_SURROGATE": {
+            "artifact": "wse_surrogate_stage1b.json",
+            "cleanup": {
+              "baseline": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "next": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              }
+            },
+            "device_logs": {
+              "files": [
+                {
+                  "bytes": 2442,
+                  "path": "debug/plog/plog-398422_20260908175532074.log",
+                  "sha256": "50ca0ca58cb98fdf7083fce22246b7b19182321a431dd471b25765344c2b187a"
+                },
+                {
+                  "bytes": 21834,
+                  "path": "run/device-1/device-398422_20260908175527380.log",
+                  "sha256": "034025814b1982010649944f022fc5cdaff3c80a3c31b6723ad967002c2b5caf"
+                },
+                {
+                  "bytes": 67995,
+                  "path": "run/plog/plog-398422_20260908175523400.log",
+                  "sha256": "947b73072fa034027f214d5693854f04e62db268f7bd591f0033f632b84e6cb7"
+                }
+              ],
+              "p2p_enable_observed": true,
+              "p2p_memory_released": true
+            },
+            "exit_code": 0,
+            "host_log": {
+              "bytes": 0,
+              "path": "wse_surrogate_stage1b.log",
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "pid": 398422,
+            "success": true
+          }
+        },
+        "evidence_status": "SIMULATION",
+        "fallback_used": false,
+        "generation": 1,
+        "host_bounce_bytes": 0,
+        "host_hot_path": {
+          "completion_messages": 0,
+          "control_messages": 0,
+          "payload_bytes": 0,
+          "task_messages": 0
+        },
+        "next_generation": 2,
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "observation": {
+          "backend": "cann_acl_vmm_p2p",
+          "baseline_driver_report": {
+            "checksum_errors": 0,
+            "completions": 4,
+            "credits_acquired": 4,
+            "credits_returned": 4,
+            "current_slot_preserved": 0,
+            "elapsed_cycles": 1076260,
+            "generation_errors": 0,
+            "input_fences": 4,
+            "marker_errors": 0,
+            "mode": 0,
+            "old_completion_credit_releases": 0,
+            "output_fences": 0,
+            "processed": 4,
+            "progress_after_stale": 0,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "stale_completion_injections": 0,
+            "stale_completion_rejections": 0,
+            "stale_descriptor_injections": 0,
+            "stale_descriptor_rejections": 0,
+            "submissions": 4,
+            "terminal_tasks": 4,
+            "timeouts": 0,
+            "validation_errors": 0
+          },
+          "baseline_sequence_count": 4,
+          "baseline_service_report": {
+            "checksum_errors": 0,
+            "completions": 4,
+            "credits_acquired": 0,
+            "credits_returned": 0,
+            "current_slot_preserved": 0,
+            "elapsed_cycles": 1920882,
+            "generation_errors": 0,
+            "input_fences": 0,
+            "marker_errors": 0,
+            "mode": 0,
+            "old_completion_credit_releases": 0,
+            "output_fences": 4,
+            "processed": 4,
+            "progress_after_stale": 0,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "stale_completion_injections": 0,
+            "stale_completion_rejections": 0,
+            "stale_descriptor_injections": 0,
+            "stale_descriptor_rejections": 0,
+            "submissions": 4,
+            "terminal_tasks": 4,
+            "timeouts": 0,
+            "validation_errors": 0
+          },
+          "case_id": "T08",
+          "current_slot_preserved": true,
+          "device_completions": 5,
+          "device_submissions": 5,
+          "driver_binary_sha256": "045dd9363fa42351dccdad76474b8bd48ea328fe478b378948042102d38e3077",
+          "driver_context": "AIV_DEVICE_KERNEL",
+          "driver_kernel": "pypto_stage1b_t08_driver_0_mix_aiv",
+          "driver_launches": 2,
+          "fallback_used": false,
+          "generation": 1,
+          "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+          "handle_probe_api": "aclrtMemImportFromShareableHandle",
+          "host_bounce_bytes": 0,
+          "host_hot_path_completion_messages": 0,
+          "host_hot_path_control_messages": 0,
+          "host_hot_path_payload_bytes": 0,
+          "host_hot_path_task_messages": 0,
+          "input_fence": "st_dev_payload_metadata+dsb_all+st_dev_submission",
+          "max_inflight": 1,
+          "new_handle_collisions": 0,
+          "next_driver_report": {
+            "checksum_errors": 0,
+            "completions": 1,
+            "credits_acquired": 1,
+            "credits_returned": 1,
+            "current_slot_preserved": 1,
+            "elapsed_cycles": 279356,
+            "generation_errors": 0,
+            "input_fences": 1,
+            "marker_errors": 0,
+            "mode": 1,
+            "old_completion_credit_releases": 0,
+            "output_fences": 0,
+            "processed": 1,
+            "progress_after_stale": 1,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "stale_completion_injections": 0,
+            "stale_completion_rejections": 1,
+            "stale_descriptor_injections": 1,
+            "stale_descriptor_rejections": 0,
+            "submissions": 1,
+            "terminal_tasks": 1,
+            "timeouts": 0,
+            "validation_errors": 0
+          },
+          "next_generation": 2,
+          "next_sequence_count": 1,
+          "next_service_report": {
+            "checksum_errors": 0,
+            "completions": 1,
+            "credits_acquired": 0,
+            "credits_returned": 0,
+            "current_slot_preserved": 1,
+            "elapsed_cycles": 3645194,
+            "generation_errors": 0,
+            "input_fences": 0,
+            "marker_errors": 0,
+            "mode": 1,
+            "old_completion_credit_releases": 0,
+            "output_fences": 1,
+            "processed": 1,
+            "progress_after_stale": 1,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "stale_completion_injections": 1,
+            "stale_completion_rejections": 0,
+            "stale_descriptor_injections": 0,
+            "stale_descriptor_rejections": 1,
+            "submissions": 1,
+            "terminal_tasks": 1,
+            "timeouts": 0,
+            "validation_errors": 0
+          },
+          "old_completion_credit_releases": 0,
+          "old_handle_import_successes": 0,
+          "old_handle_rejected_after_reallocate": 2,
+          "old_handle_rejected_before_reallocate": 2,
+          "output_fence": "st_dev_output_metadata+dsb_all+st_dev_completion",
+          "passed": true,
+          "payload_bytes": 4096,
+          "progress_after_stale": 1,
+          "service_binary_sha256": "b56f4c02305b72507c698b4232877078effcccc667925eb5dcac43e2746ab1af",
+          "service_context": "AIV_DEVICE_KERNEL",
+          "service_kernel": "pypto_stage1b_t08_service_0_mix_aiv",
+          "service_launches": 2,
+          "slot_count": 1,
+          "stale_completion_injections": 1,
+          "stale_completion_rejections": 1,
+          "stale_descriptor_injections": 1,
+          "stale_descriptor_rejections": 1,
+          "transport_scope": "HOST_LOCAL",
+          "validated_sequences": 5
+        },
+        "profile": "NPU_SURROGATE",
+        "resource_cleanup": "VERIFIED",
+        "run_id": "stage1b-t08-8996b806c6ae4153b83d46fed58a9f19",
+        "schema_version": 1,
+        "stage1b_progress": "T08_PASS",
+        "start_order": "attention-first",
+        "success": true,
+        "transport_scope": "HOST_LOCAL"
+      },
+      "task_id": "task_20260908_175522_39823812451"
+    },
+    {
+      "endpoints": {
+        "ATTENTION": {
+          "cleanup": {
+            "baseline": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "next": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            }
+          },
+          "control": {
+            "received_bytes": 2891,
+            "received_messages": {
+              "ATTACHED": 2,
+              "DETACHED": 2,
+              "DRAIN": 2,
+              "MANIFEST": 2,
+              "PROBE_RESULT": 2,
+              "READY": 2,
+              "RELEASED": 2
+            },
+            "sent_bytes": 2835,
+            "sent_messages": {
+              "ATTACHED": 2,
+              "DETACHED": 2,
+              "DRAIN": 2,
+              "MANIFEST": 2,
+              "PROBE_RESULT": 2,
+              "READY": 2,
+              "RELEASED": 2
+            }
+          },
+          "device_id": 0,
+          "device_loop": null,
+          "error": null,
+          "generation_runs": [
+            {
+              "binary_sha256": "045dd9363fa42351dccdad76474b8bd48ea328fe478b378948042102d38e3077",
+              "elapsed_ns": 2036387,
+              "generation": 1,
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1b_t08_driver_0_mix_aiv",
+              "launches": 1,
+              "mode": 0,
+              "report": {
+                "checksum_errors": 0,
+                "completions": 4,
+                "credits_acquired": 4,
+                "credits_returned": 4,
+                "current_slot_preserved": 0,
+                "elapsed_cycles": 1887815,
+                "generation_errors": 0,
+                "input_fences": 4,
+                "marker_errors": 0,
+                "mode": 0,
+                "old_completion_credit_releases": 0,
+                "output_fences": 0,
+                "processed": 4,
+                "progress_after_stale": 0,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "stale_completion_injections": 0,
+                "stale_completion_rejections": 0,
+                "stale_descriptor_injections": 0,
+                "stale_descriptor_rejections": 0,
+                "submissions": 4,
+                "terminal_tasks": 4,
+                "timeouts": 0,
+                "validation_errors": 0
+              }
+            },
+            {
+              "binary_sha256": "045dd9363fa42351dccdad76474b8bd48ea328fe478b378948042102d38e3077",
+              "elapsed_ns": 2712963,
+              "generation": 2,
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1b_t08_driver_0_mix_aiv",
+              "launches": 1,
+              "mode": 1,
+              "report": {
+                "checksum_errors": 0,
+                "completions": 1,
+                "credits_acquired": 1,
+                "credits_returned": 1,
+                "current_slot_preserved": 1,
+                "elapsed_cycles": 2639782,
+                "generation_errors": 0,
+                "input_fences": 1,
+                "marker_errors": 0,
+                "mode": 1,
+                "old_completion_credit_releases": 0,
+                "output_fences": 0,
+                "processed": 1,
+                "progress_after_stale": 1,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "stale_completion_injections": 0,
+                "stale_completion_rejections": 1,
+                "stale_descriptor_injections": 1,
+                "stale_descriptor_rejections": 0,
+                "submissions": 1,
+                "terminal_tasks": 1,
+                "timeouts": 0,
+                "validation_errors": 0
+              }
+            }
+          ],
+          "handle_invalidation": {
+            "after_reallocate": {
+              "api": "aclrtMemImportFromShareableHandle",
+              "rejected": true,
+              "result_code": 507899
+            },
+            "api": "aclrtMemImportFromShareableHandle",
+            "before_reallocate": {
+              "api": "aclrtMemImportFromShareableHandle",
+              "rejected": true,
+              "result_code": 507899
+            },
+            "local_handle_changed": true,
+            "new_local_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "c59ddbc33bdf591e9b6ff4e03cce5839b1ee291798215f88d9c489b9cb03365b"
+            },
+            "new_peer_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "095f1da160dc95851ed0ed2c7c3371e36f08546ff435c48d92a85a43300acad8"
+            },
+            "old_local_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "0467821f46177852b9a8dfa9fbca11db28a1bbc5b1f3d2965c6acb3b79aad9f9"
+            },
+            "old_peer_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "ff563acb0222fa1fc8a5932b7cf2e3cc090538ad6f33bad0846bc125c21169cf"
+            },
+            "peer_handle_changed": true
+          },
+          "manifest": null,
+          "manifests": [
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 0,
+              "generation": 1,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1049088,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "0467821f46177852b9a8dfa9fbca11db28a1bbc5b1f3d2965c6acb3b79aad9f9"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 0,
+              "generation": 2,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1049088,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "c59ddbc33bdf591e9b6ff4e03cce5839b1ee291798215f88d9c489b9cb03365b"
+              },
+              "transport_scope": "HOST_LOCAL"
+            }
+          ],
+          "role": "ATTENTION",
+          "success": true
+        },
+        "WSE_SURROGATE": {
+          "cleanup": {
+            "baseline": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "next": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            }
+          },
+          "control": {
+            "received_bytes": 2835,
+            "received_messages": {
+              "ATTACHED": 2,
+              "DETACHED": 2,
+              "DRAIN": 2,
+              "MANIFEST": 2,
+              "PROBE_RESULT": 2,
+              "READY": 2,
+              "RELEASED": 2
+            },
+            "sent_bytes": 2891,
+            "sent_messages": {
+              "ATTACHED": 2,
+              "DETACHED": 2,
+              "DRAIN": 2,
+              "MANIFEST": 2,
+              "PROBE_RESULT": 2,
+              "READY": 2,
+              "RELEASED": 2
+            }
+          },
+          "device_id": 1,
+          "device_loop": null,
+          "error": null,
+          "generation_runs": [
+            {
+              "binary_sha256": "b56f4c02305b72507c698b4232877078effcccc667925eb5dcac43e2746ab1af",
+              "elapsed_ns": 1064498,
+              "generation": 1,
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1b_t08_service_0_mix_aiv",
+              "launches": 1,
+              "mode": 0,
+              "report": {
+                "checksum_errors": 0,
+                "completions": 4,
+                "credits_acquired": 0,
+                "credits_returned": 0,
+                "current_slot_preserved": 0,
+                "elapsed_cycles": 918120,
+                "generation_errors": 0,
+                "input_fences": 0,
+                "marker_errors": 0,
+                "mode": 0,
+                "old_completion_credit_releases": 0,
+                "output_fences": 4,
+                "processed": 4,
+                "progress_after_stale": 0,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "stale_completion_injections": 0,
+                "stale_completion_rejections": 0,
+                "stale_descriptor_injections": 0,
+                "stale_descriptor_rejections": 0,
+                "submissions": 4,
+                "terminal_tasks": 4,
+                "timeouts": 0,
+                "validation_errors": 0
+              }
+            },
+            {
+              "binary_sha256": "b56f4c02305b72507c698b4232877078effcccc667925eb5dcac43e2746ab1af",
+              "elapsed_ns": 1007151,
+              "generation": 2,
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1b_t08_service_0_mix_aiv",
+              "launches": 1,
+              "mode": 1,
+              "report": {
+                "checksum_errors": 0,
+                "completions": 1,
+                "credits_acquired": 0,
+                "credits_returned": 0,
+                "current_slot_preserved": 1,
+                "elapsed_cycles": 774374,
+                "generation_errors": 0,
+                "input_fences": 0,
+                "marker_errors": 0,
+                "mode": 1,
+                "old_completion_credit_releases": 0,
+                "output_fences": 1,
+                "processed": 1,
+                "progress_after_stale": 1,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "stale_completion_injections": 1,
+                "stale_completion_rejections": 0,
+                "stale_descriptor_injections": 0,
+                "stale_descriptor_rejections": 1,
+                "submissions": 1,
+                "terminal_tasks": 1,
+                "timeouts": 0,
+                "validation_errors": 0
+              }
+            }
+          ],
+          "handle_invalidation": {
+            "after_reallocate": {
+              "api": "aclrtMemImportFromShareableHandle",
+              "rejected": true,
+              "result_code": 507899
+            },
+            "api": "aclrtMemImportFromShareableHandle",
+            "before_reallocate": {
+              "api": "aclrtMemImportFromShareableHandle",
+              "rejected": true,
+              "result_code": 507899
+            },
+            "local_handle_changed": true,
+            "new_local_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "095f1da160dc95851ed0ed2c7c3371e36f08546ff435c48d92a85a43300acad8"
+            },
+            "new_peer_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "c59ddbc33bdf591e9b6ff4e03cce5839b1ee291798215f88d9c489b9cb03365b"
+            },
+            "old_local_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "ff563acb0222fa1fc8a5932b7cf2e3cc090538ad6f33bad0846bc125c21169cf"
+            },
+            "old_peer_opaque_handle": {
+              "kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "sha256": "0467821f46177852b9a8dfa9fbca11db28a1bbc5b1f3d2965c6acb3b79aad9f9"
+            },
+            "peer_handle_changed": true
+          },
+          "manifest": null,
+          "manifests": [
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 1,
+              "generation": 1,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1049088,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "ff563acb0222fa1fc8a5932b7cf2e3cc090538ad6f33bad0846bc125c21169cf"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 1,
+              "generation": 2,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1049088,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "095f1da160dc95851ed0ed2c7c3371e36f08546ff435c48d92a85a43300acad8"
+              },
+              "transport_scope": "HOST_LOCAL"
+            }
+          ],
+          "role": "WSE_SURROGATE",
+          "success": true
+        }
+      },
+      "result": {
+        "actual_backend": "cann_acl_vmm_p2p",
+        "c2_status": "NOT_ESTABLISHED",
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "completed_at": "2026-09-08T09:56:28.561360+00:00",
+        "data_results": {
+          "T08": {
+            "attempts": 5,
+            "bytes": 40960,
+            "passed": 5,
+            "status": "PASS"
+          }
+        },
+        "devices": {
+          "ATTENTION": 0,
+          "WSE_SURROGATE": 1
+        },
+        "endpoints": {
+          "ATTENTION": {
+            "artifact": "attention_stage1b.json",
+            "cleanup": {
+              "baseline": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "next": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              }
+            },
+            "device_logs": {
+              "files": [
+                {
+                  "bytes": 2442,
+                  "path": "debug/plog/plog-406995_20260908175621950.log",
+                  "sha256": "b27e2df948364643f4f923151f9226933b1b3f9925bba33315eaa3495c029456"
+                },
+                {
+                  "bytes": 21842,
+                  "path": "run/device-0/device-406995_20260908175617165.log",
+                  "sha256": "db08fc82c467fa21e89e9da9b6f86b13a34fa5bb13f163136985c82f59825172"
+                },
+                {
+                  "bytes": 67995,
+                  "path": "run/plog/plog-406995_20260908175613043.log",
+                  "sha256": "7c1ced56d890bec3f7c4105c81b29c3ba7f588d3b7de1d5875ac0ff8ede6b53a"
+                }
+              ],
+              "p2p_enable_observed": true,
+              "p2p_memory_released": true
+            },
+            "exit_code": 0,
+            "host_log": {
+              "bytes": 0,
+              "path": "attention_stage1b.log",
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "pid": 406995,
+            "success": true
+          },
+          "WSE_SURROGATE": {
+            "artifact": "wse_surrogate_stage1b.json",
+            "cleanup": {
+              "baseline": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "next": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              }
+            },
+            "device_logs": {
+              "files": [
+                {
+                  "bytes": 2442,
+                  "path": "debug/plog/plog-406954_20260908175620737.log",
+                  "sha256": "00be3ef3abdfe17e9bc5fbd7993822d063370a1fa9470a63f2ef4c3edf8f5b3f"
+                },
+                {
+                  "bytes": 21834,
+                  "path": "run/device-1/device-406954_20260908175616547.log",
+                  "sha256": "735fa16cf67ff5c637e2084f60f78cce366affe4b5af089605ca37b2e14035d8"
+                },
+                {
+                  "bytes": 67989,
+                  "path": "run/plog/plog-406954_20260908175613043.log",
+                  "sha256": "bd0121b8ecbbdc0ae86e1982bb08f8befb4d8a34cc2b54e8d52770753f53b456"
+                }
+              ],
+              "p2p_enable_observed": true,
+              "p2p_memory_released": true
+            },
+            "exit_code": 0,
+            "host_log": {
+              "bytes": 0,
+              "path": "wse_surrogate_stage1b.log",
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "pid": 406954,
+            "success": true
+          }
+        },
+        "evidence_status": "SIMULATION",
+        "fallback_used": false,
+        "generation": 1,
+        "host_bounce_bytes": 0,
+        "host_hot_path": {
+          "completion_messages": 0,
+          "control_messages": 0,
+          "payload_bytes": 0,
+          "task_messages": 0
+        },
+        "next_generation": 2,
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "observation": {
+          "backend": "cann_acl_vmm_p2p",
+          "baseline_driver_report": {
+            "checksum_errors": 0,
+            "completions": 4,
+            "credits_acquired": 4,
+            "credits_returned": 4,
+            "current_slot_preserved": 0,
+            "elapsed_cycles": 1887815,
+            "generation_errors": 0,
+            "input_fences": 4,
+            "marker_errors": 0,
+            "mode": 0,
+            "old_completion_credit_releases": 0,
+            "output_fences": 0,
+            "processed": 4,
+            "progress_after_stale": 0,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "stale_completion_injections": 0,
+            "stale_completion_rejections": 0,
+            "stale_descriptor_injections": 0,
+            "stale_descriptor_rejections": 0,
+            "submissions": 4,
+            "terminal_tasks": 4,
+            "timeouts": 0,
+            "validation_errors": 0
+          },
+          "baseline_sequence_count": 4,
+          "baseline_service_report": {
+            "checksum_errors": 0,
+            "completions": 4,
+            "credits_acquired": 0,
+            "credits_returned": 0,
+            "current_slot_preserved": 0,
+            "elapsed_cycles": 918120,
+            "generation_errors": 0,
+            "input_fences": 0,
+            "marker_errors": 0,
+            "mode": 0,
+            "old_completion_credit_releases": 0,
+            "output_fences": 4,
+            "processed": 4,
+            "progress_after_stale": 0,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "stale_completion_injections": 0,
+            "stale_completion_rejections": 0,
+            "stale_descriptor_injections": 0,
+            "stale_descriptor_rejections": 0,
+            "submissions": 4,
+            "terminal_tasks": 4,
+            "timeouts": 0,
+            "validation_errors": 0
+          },
+          "case_id": "T08",
+          "current_slot_preserved": true,
+          "device_completions": 5,
+          "device_submissions": 5,
+          "driver_binary_sha256": "045dd9363fa42351dccdad76474b8bd48ea328fe478b378948042102d38e3077",
+          "driver_context": "AIV_DEVICE_KERNEL",
+          "driver_kernel": "pypto_stage1b_t08_driver_0_mix_aiv",
+          "driver_launches": 2,
+          "fallback_used": false,
+          "generation": 1,
+          "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+          "handle_probe_api": "aclrtMemImportFromShareableHandle",
+          "host_bounce_bytes": 0,
+          "host_hot_path_completion_messages": 0,
+          "host_hot_path_control_messages": 0,
+          "host_hot_path_payload_bytes": 0,
+          "host_hot_path_task_messages": 0,
+          "input_fence": "st_dev_payload_metadata+dsb_all+st_dev_submission",
+          "max_inflight": 1,
+          "new_handle_collisions": 0,
+          "next_driver_report": {
+            "checksum_errors": 0,
+            "completions": 1,
+            "credits_acquired": 1,
+            "credits_returned": 1,
+            "current_slot_preserved": 1,
+            "elapsed_cycles": 2639782,
+            "generation_errors": 0,
+            "input_fences": 1,
+            "marker_errors": 0,
+            "mode": 1,
+            "old_completion_credit_releases": 0,
+            "output_fences": 0,
+            "processed": 1,
+            "progress_after_stale": 1,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "stale_completion_injections": 0,
+            "stale_completion_rejections": 1,
+            "stale_descriptor_injections": 1,
+            "stale_descriptor_rejections": 0,
+            "submissions": 1,
+            "terminal_tasks": 1,
+            "timeouts": 0,
+            "validation_errors": 0
+          },
+          "next_generation": 2,
+          "next_sequence_count": 1,
+          "next_service_report": {
+            "checksum_errors": 0,
+            "completions": 1,
+            "credits_acquired": 0,
+            "credits_returned": 0,
+            "current_slot_preserved": 1,
+            "elapsed_cycles": 774374,
+            "generation_errors": 0,
+            "input_fences": 0,
+            "marker_errors": 0,
+            "mode": 1,
+            "old_completion_credit_releases": 0,
+            "output_fences": 1,
+            "processed": 1,
+            "progress_after_stale": 1,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "stale_completion_injections": 1,
+            "stale_completion_rejections": 0,
+            "stale_descriptor_injections": 0,
+            "stale_descriptor_rejections": 1,
+            "submissions": 1,
+            "terminal_tasks": 1,
+            "timeouts": 0,
+            "validation_errors": 0
+          },
+          "old_completion_credit_releases": 0,
+          "old_handle_import_successes": 0,
+          "old_handle_rejected_after_reallocate": 2,
+          "old_handle_rejected_before_reallocate": 2,
+          "output_fence": "st_dev_output_metadata+dsb_all+st_dev_completion",
+          "passed": true,
+          "payload_bytes": 4096,
+          "progress_after_stale": 1,
+          "service_binary_sha256": "b56f4c02305b72507c698b4232877078effcccc667925eb5dcac43e2746ab1af",
+          "service_context": "AIV_DEVICE_KERNEL",
+          "service_kernel": "pypto_stage1b_t08_service_0_mix_aiv",
+          "service_launches": 2,
+          "slot_count": 1,
+          "stale_completion_injections": 1,
+          "stale_completion_rejections": 1,
+          "stale_descriptor_injections": 1,
+          "stale_descriptor_rejections": 1,
+          "transport_scope": "HOST_LOCAL",
+          "validated_sequences": 5
+        },
+        "profile": "NPU_SURROGATE",
+        "resource_cleanup": "VERIFIED",
+        "run_id": "stage1b-t08-a62e160b3473418d9db28e77289a3923",
+        "schema_version": 1,
+        "stage1b_progress": "T08_PASS",
+        "start_order": "wse-first",
+        "success": true,
+        "transport_scope": "HOST_LOCAL"
+      },
+      "task_id": "task_20260908_175612_40680326335"
+    }
+  ]
+}
