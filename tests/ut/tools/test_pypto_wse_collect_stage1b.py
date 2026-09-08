@@ -16,6 +16,7 @@ from tests.ut.tools.test_pypto_wse_stage1b_t06 import _driver_report as _t06_dri
 from tests.ut.tools.test_pypto_wse_stage1b_t06_contracts import _observation as _t06_observation
 from tests.ut.tools.test_pypto_wse_stage1b_t07 import _driver_report as _t07_driver_report
 from tests.ut.tools.test_pypto_wse_stage1b_t07_contracts import _observation as _t07_observation
+from tests.ut.tools.test_pypto_wse_stage1b_t08_contracts import _observation as _t08_observation
 from tools.pypto_wse_validation.collect_stage1b import collect_stage1b
 from tools.pypto_wse_validation.contracts import EndpointRole
 from tools.pypto_wse_validation.stage1b_contracts import T04_SEQUENCE_COUNT
@@ -325,4 +326,114 @@ def test_collect_validates_t07_runs_and_preserves_claim_boundary(tmp_path):
         "t07": "PASS",
         "t08_t12": "NOT_RUN",
         "validated_case": "T07",
+    }
+
+
+def _write_t08_run(path: Path, start_order: str) -> None:
+    path.mkdir()
+    observation = _t08_observation()
+    for device_id, role in enumerate(EndpointRole):
+        driver = role is EndpointRole.ATTENTION
+        reports = (
+            (observation.baseline_driver_report, observation.next_driver_report)
+            if driver
+            else (observation.baseline_service_report, observation.next_service_report)
+        )
+        kernel = observation.driver_kernel if driver else observation.service_kernel
+        binary_hash = observation.driver_binary_sha256 if driver else observation.service_binary_sha256
+        endpoint = {
+            "cleanup": {
+                generation: {
+                    "device_kernel": "CLOSED",
+                    "imported_window": "CLOSED",
+                    "owned_window": "CLOSED",
+                    "runtime": "CLOSED",
+                }
+                for generation in ("baseline", "next")
+            },
+            "control": {},
+            "device_id": device_id,
+            "error": None,
+            "generation_runs": [
+                {
+                    "binary_sha256": binary_hash,
+                    "generation": 1 + mode,
+                    "hot_path": {
+                        "completion_messages": 0,
+                        "control_bytes": 0,
+                        "control_messages": 0,
+                        "payload_bytes": 0,
+                        "task_messages": 0,
+                    },
+                    "kernel": kernel,
+                    "launches": 1,
+                    "mode": mode,
+                    "report": reports[mode].to_dict(),
+                }
+                for mode in (0, 1)
+            ],
+            "handle_invalidation": {
+                "api": observation.handle_probe_api,
+                "before_reallocate": {"rejected": True, "result_code": 145001},
+                "after_reallocate": {"rejected": True, "result_code": 145001},
+                "local_handle_changed": True,
+                "peer_handle_changed": True,
+                "old_local_opaque_handle": {"kind": "ACL_VMM_SHAREABLE_HANDLE", "sha256": "a" * 64},
+                "new_local_opaque_handle": {"kind": "ACL_VMM_SHAREABLE_HANDLE", "sha256": "b" * 64},
+                "old_peer_opaque_handle": {"kind": "ACL_VMM_SHAREABLE_HANDLE", "sha256": "c" * 64},
+                "new_peer_opaque_handle": {"kind": "ACL_VMM_SHAREABLE_HANDLE", "sha256": "d" * 64},
+            },
+            "manifests": [
+                {
+                    "generation": generation,
+                    "opaque_handle": {"kind": "ACL_VMM_SHAREABLE_HANDLE", "sha256": hash_character * 64},
+                }
+                for generation, hash_character in ((1, "a"), (2, "b"))
+            ],
+            "role": role.value,
+            "success": True,
+        }
+        (path / f"{role.value.lower()}_stage1b.json").write_text(json.dumps(endpoint), encoding="utf-8")
+    result = {
+        "capability_level": "C1",
+        "c2_status": "NOT_ESTABLISHED",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "data_results": {"T08": {"passed": 5, "status": "PASS"}},
+        "host_bounce_bytes": 0,
+        "host_hot_path": {
+            "completion_messages": 0,
+            "control_messages": 0,
+            "payload_bytes": 0,
+            "task_messages": 0,
+        },
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "observation": observation.to_dict(),
+        "resource_cleanup": "VERIFIED",
+        "stage1b_progress": "T08_PASS",
+        "start_order": start_order,
+        "success": True,
+    }
+    (path / "result.json").write_text(json.dumps(result), encoding="utf-8")
+
+
+def test_collect_validates_t08_runs_and_preserves_claim_boundary(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _write_t08_run(first, "attention-first")
+    _write_t08_run(second, "wse-first")
+    evidence = collect_stage1b(
+        successful_runs=(("task-a", first), ("task-b", second)),
+        implementation_revision="abc123",
+        case_id="T08",
+        collected_at="2026-09-08T00:00:00+00:00",
+    )
+    assert evidence["conclusion"] == {
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "c2_status": "NOT_ESTABLISHED",
+        "evidence_status": "SIMULATION",
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "t08": "PASS",
+        "t09_t12": "NOT_RUN",
+        "validated_case": "T08",
     }

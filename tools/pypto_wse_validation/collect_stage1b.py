@@ -24,10 +24,14 @@ from tools.pypto_wse_validation.stage1b_contracts import (
     T06_SEQUENCE_COUNT,
     T07_CASE_ID,
     T07_SEQUENCE_COUNT,
+    T08_BASELINE_SEQUENCE_COUNT,
+    T08_CASE_ID,
+    T08_NEXT_SEQUENCE_COUNT,
     T04Observation,
     T05Observation,
     T06Observation,
     T07Observation,
+    T08Observation,
 )
 
 SCHEMA_VERSION = 1
@@ -65,7 +69,10 @@ def _endpoint_evidence(run_dir: Path, role: EndpointRole) -> dict[str, Any]:
         "device_id": endpoint.get("device_id"),
         "device_loop": endpoint.get("device_loop"),
         "error": endpoint.get("error"),
+        "generation_runs": endpoint.get("generation_runs"),
+        "handle_invalidation": endpoint.get("handle_invalidation"),
         "manifest": endpoint.get("manifest"),
+        "manifests": endpoint.get("manifests"),
         "role": endpoint.get("role"),
         "success": endpoint.get("success"),
     }
@@ -86,9 +93,12 @@ def _validate_success(result: Mapping[str, Any], endpoints: Mapping[str, Mapping
     elif case_id == T06_CASE_ID:
         observation_type = T06Observation
         sequence_count = T06_SEQUENCE_COUNT
-    else:
+    elif case_id == T07_CASE_ID:
         observation_type = T07Observation
         sequence_count = T07_SEQUENCE_COUNT
+    else:
+        observation_type = T08Observation
+        sequence_count = T08_BASELINE_SEQUENCE_COUNT + T08_NEXT_SEQUENCE_COUNT
     if not isinstance(observation_raw, dict) or not observation_type.from_dict(observation_raw).passed:
         raise ValueError(f"successful run is missing valid {case_id} device-loop evidence")
     case_result = result.get("data_results", {}).get(case_id, {})
@@ -134,7 +144,7 @@ def collect_stage1b(
     case_id: str = T04_CASE_ID,
     collected_at: str | None = None,
 ) -> dict[str, Any]:
-    if case_id not in (T04_CASE_ID, T05_CASE_ID, T06_CASE_ID, T07_CASE_ID):
+    if case_id not in (T04_CASE_ID, T05_CASE_ID, T06_CASE_ID, T07_CASE_ID, T08_CASE_ID):
         raise ValueError(f"unsupported Stage 1B case: {case_id}")
     if len(successful_runs) < 2:
         raise ValueError("at least two successful Stage 1B runs are required")
@@ -154,8 +164,10 @@ def collect_stage1b(
         conclusion.update({"t05": "PASS", "t06_t12": "NOT_RUN", "validated_case": case_id})
     elif case_id == T06_CASE_ID:
         conclusion.update({"t06": "PASS", "t07_t12": "NOT_RUN", "validated_case": case_id})
-    else:
+    elif case_id == T07_CASE_ID:
         conclusion.update({"t07": "PASS", "t08_t12": "NOT_RUN", "validated_case": case_id})
+    else:
+        conclusion.update({"t08": "PASS", "t09_t12": "NOT_RUN", "validated_case": case_id})
     return {
         "collected_at": collected_at or datetime.now(UTC).isoformat(),
         "conclusion": conclusion,
@@ -188,7 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--implementation-revision", required=True)
     parser.add_argument(
         "--case-id",
-        choices=(T04_CASE_ID, T05_CASE_ID, T06_CASE_ID, T07_CASE_ID),
+        choices=(T04_CASE_ID, T05_CASE_ID, T06_CASE_ID, T07_CASE_ID, T08_CASE_ID),
         default=T04_CASE_ID,
     )
     parser.add_argument("--collected-at")
