@@ -12,6 +12,8 @@ from tests.ut.tools.test_pypto_wse_stage1b import _report
 from tests.ut.tools.test_pypto_wse_stage1b_contracts import _observation
 from tests.ut.tools.test_pypto_wse_stage1b_t05 import _driver_report as _t05_driver_report
 from tests.ut.tools.test_pypto_wse_stage1b_t05_contracts import _observation as _t05_observation
+from tests.ut.tools.test_pypto_wse_stage1b_t06 import _driver_report as _t06_driver_report
+from tests.ut.tools.test_pypto_wse_stage1b_t06_contracts import _observation as _t06_observation
 from tools.pypto_wse_validation.collect_stage1b import collect_stage1b
 from tools.pypto_wse_validation.contracts import EndpointRole
 from tools.pypto_wse_validation.stage1b_contracts import T04_SEQUENCE_COUNT
@@ -173,4 +175,78 @@ def test_collect_validates_t05_runs_and_preserves_claim_boundary(tmp_path):
         "t05": "PASS",
         "t06_t12": "NOT_RUN",
         "validated_case": "T05",
+    }
+
+
+def _write_t06_run(path: Path, start_order: str) -> None:
+    path.mkdir()
+    observation = _t06_observation()
+    for device_id, role in enumerate(EndpointRole):
+        endpoint = {
+            "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED",
+            },
+            "control": {},
+            "device_id": device_id,
+            "device_loop": {
+                "binary_sha256": "a" * 64,
+                "elapsed_ns": 1,
+                "hot_path": {},
+                "kernel": observation.driver_kernel if role is EndpointRole.ATTENTION else observation.service_kernel,
+                "launches": 1,
+                "report": (
+                    _t06_driver_report() if role is EndpointRole.ATTENTION else observation.service_report
+                ).to_dict(),
+            },
+            "error": None,
+            "manifest": {"opaque_handle": {"kind": "ACL_VMM_SHAREABLE_HANDLE", "sha256": "a" * 64}},
+            "role": role.value,
+            "success": True,
+        }
+        (path / f"{role.value.lower()}_stage1b.json").write_text(json.dumps(endpoint), encoding="utf-8")
+    result = {
+        "capability_level": "C1",
+        "c2_status": "NOT_ESTABLISHED",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "data_results": {"T06": {"passed": 4, "status": "PASS"}},
+        "host_bounce_bytes": 0,
+        "host_hot_path": {
+            "completion_messages": 0,
+            "control_messages": 0,
+            "payload_bytes": 0,
+            "task_messages": 0,
+        },
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "observation": observation.to_dict(),
+        "resource_cleanup": "VERIFIED",
+        "stage1b_progress": "T06_PASS",
+        "start_order": start_order,
+        "success": True,
+    }
+    (path / "result.json").write_text(json.dumps(result), encoding="utf-8")
+
+
+def test_collect_validates_t06_runs_and_preserves_claim_boundary(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _write_t06_run(first, "attention-first")
+    _write_t06_run(second, "wse-first")
+    evidence = collect_stage1b(
+        successful_runs=(("task-a", first), ("task-b", second)),
+        implementation_revision="abc123",
+        case_id="T06",
+        collected_at="2026-09-08T00:00:00+00:00",
+    )
+    assert evidence["conclusion"] == {
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "c2_status": "NOT_ESTABLISHED",
+        "evidence_status": "SIMULATION",
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "t06": "PASS",
+        "t07_t12": "NOT_RUN",
+        "validated_case": "T06",
     }

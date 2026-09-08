@@ -20,8 +20,11 @@ from tools.pypto_wse_validation.stage1b_contracts import (
     T04_SEQUENCE_COUNT,
     T05_CASE_ID,
     T05_SEQUENCE_COUNT,
+    T06_CASE_ID,
+    T06_SEQUENCE_COUNT,
     T04Observation,
     T05Observation,
+    T06Observation,
 )
 
 SCHEMA_VERSION = 1
@@ -71,11 +74,18 @@ def _endpoint_evidence(run_dir: Path, role: EndpointRole) -> dict[str, Any]:
 
 def _validate_success(result: Mapping[str, Any], endpoints: Mapping[str, Mapping[str, Any]], case_id: str) -> None:
     observation_raw = result.get("observation")
-    observation_type = T04Observation if case_id == T04_CASE_ID else T05Observation
+    if case_id == T04_CASE_ID:
+        observation_type = T04Observation
+        sequence_count = T04_SEQUENCE_COUNT
+    elif case_id == T05_CASE_ID:
+        observation_type = T05Observation
+        sequence_count = T05_SEQUENCE_COUNT
+    else:
+        observation_type = T06Observation
+        sequence_count = T06_SEQUENCE_COUNT
     if not isinstance(observation_raw, dict) or not observation_type.from_dict(observation_raw).passed:
         raise ValueError(f"successful run is missing valid {case_id} device-loop evidence")
     case_result = result.get("data_results", {}).get(case_id, {})
-    sequence_count = T04_SEQUENCE_COUNT if case_id == T04_CASE_ID else T05_SEQUENCE_COUNT
     if (
         result.get("success") is not True
         or result.get("stage1b_progress") != f"{case_id}_PASS"
@@ -118,7 +128,7 @@ def collect_stage1b(
     case_id: str = T04_CASE_ID,
     collected_at: str | None = None,
 ) -> dict[str, Any]:
-    if case_id not in (T04_CASE_ID, T05_CASE_ID):
+    if case_id not in (T04_CASE_ID, T05_CASE_ID, T06_CASE_ID):
         raise ValueError(f"unsupported Stage 1B case: {case_id}")
     if len(successful_runs) < 2:
         raise ValueError("at least two successful Stage 1B runs are required")
@@ -134,8 +144,10 @@ def collect_stage1b(
     }
     if case_id == T04_CASE_ID:
         conclusion.update({"t04": "PASS", "t05_t12": "NOT_RUN"})
-    else:
+    elif case_id == T05_CASE_ID:
         conclusion.update({"t05": "PASS", "t06_t12": "NOT_RUN", "validated_case": case_id})
+    else:
+        conclusion.update({"t06": "PASS", "t07_t12": "NOT_RUN", "validated_case": case_id})
     return {
         "collected_at": collected_at or datetime.now(UTC).isoformat(),
         "conclusion": conclusion,
@@ -166,7 +178,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--successful-run", action="append", type=_parse_run, required=True)
     parser.add_argument("--implementation-revision", required=True)
-    parser.add_argument("--case-id", choices=(T04_CASE_ID, T05_CASE_ID), default=T04_CASE_ID)
+    parser.add_argument("--case-id", choices=(T04_CASE_ID, T05_CASE_ID, T06_CASE_ID), default=T04_CASE_ID)
     parser.add_argument("--collected-at")
     parser.add_argument("--output", type=Path, required=True)
     return parser
