@@ -88,12 +88,27 @@ from tools.pypto_wse_validation.stage1b_contracts import (
     T06_SLOT_COUNT,
     T06_THIRD_REQUEST_OUTCOME,
     T06_WINDOW_BYTES,
+    T07_CASE_ID,
+    T07_COMPLETION_CHECK,
+    T07_CONTROL_OFFSET,
+    T07_DEVICE_CONTEXT,
+    T07_DRIVER_KERNEL,
+    T07_INPUT_FENCE,
+    T07_MAX_INFLIGHT,
+    T07_OUTPUT_FENCE,
+    T07_PAYLOAD_BYTES,
+    T07_SEQUENCE_COUNT,
+    T07_SERVICE_KERNEL,
+    T07_SLOT_COUNT,
+    T07_WINDOW_BYTES,
     DeviceLoopReport,
     T04Observation,
     T05DeviceLoopReport,
     T05Observation,
     T06DeviceLoopReport,
     T06Observation,
+    T07DeviceLoopReport,
+    T07Observation,
 )
 
 T04_DRIVER_BINARY = "stage1b_t04_driver.o"
@@ -102,6 +117,8 @@ T05_DRIVER_BINARY = "stage1b_t05_driver.o"
 T05_SERVICE_BINARY = "stage1b_t05_service.o"
 T06_DRIVER_BINARY = "stage1b_t06_driver.o"
 T06_SERVICE_BINARY = "stage1b_t06_service.o"
+T07_DRIVER_BINARY = "stage1b_t07_driver.o"
+T07_SERVICE_BINARY = "stage1b_t07_service.o"
 
 
 @dataclass(frozen=True)
@@ -153,6 +170,18 @@ def _case_spec(case_id: str) -> _CaseSpec:
             service_kernel=T06_SERVICE_KERNEL,
             report_offset=(T06_SLOT_COUNT * 2 * 64) + 64,
             report_bytes=T06DeviceLoopReport._STRUCT.size,
+        )
+    if case_id == T07_CASE_ID:
+        return _CaseSpec(
+            case_id=T07_CASE_ID,
+            control_offset=T07_CONTROL_OFFSET,
+            window_bytes=T07_WINDOW_BYTES,
+            driver_binary=T07_DRIVER_BINARY,
+            service_binary=T07_SERVICE_BINARY,
+            driver_kernel=T07_DRIVER_KERNEL,
+            service_kernel=T07_SERVICE_KERNEL,
+            report_offset=T07_SLOT_COUNT * 2 * 64,
+            report_bytes=T07DeviceLoopReport._STRUCT.size,
         )
     raise ValueError(f"unsupported Stage 1B case: {case_id}")
 
@@ -222,12 +251,27 @@ def _t06_kernel_arguments(role: EndpointRole, local_address: int, peer_address: 
     )
 
 
+def _t07_kernel_arguments(role: EndpointRole, local_address: int, peer_address: int, generation: int):
+    del role  # Both role-specific binaries consume the same address ordering.
+    return _T04KernelArguments(
+        local_payload=local_address,
+        local_control=local_address + T07_CONTROL_OFFSET,
+        remote_payload=peer_address,
+        remote_control=peer_address + T07_CONTROL_OFFSET,
+        generation=generation,
+        payload_words=T07_PAYLOAD_BYTES // ctypes.sizeof(ctypes.c_uint64),
+        sequence_count=T07_SEQUENCE_COUNT,
+    )
+
+
 def _kernel_arguments_for_case(case_id: str):
     if case_id == T04_CASE_ID:
         return _kernel_arguments
     if case_id == T05_CASE_ID:
         return _t05_kernel_arguments
-    return _t06_kernel_arguments
+    if case_id == T06_CASE_ID:
+        return _t06_kernel_arguments
+    return _t07_kernel_arguments
 
 
 def _report_type_for_case(case_id: str):
@@ -235,7 +279,9 @@ def _report_type_for_case(case_id: str):
         return DeviceLoopReport
     if case_id == T05_CASE_ID:
         return T05DeviceLoopReport
-    return T06DeviceLoopReport
+    if case_id == T06_CASE_ID:
+        return T06DeviceLoopReport
+    return T07DeviceLoopReport
 
 
 def _counter_delta(after: Mapping[str, Any], before: Mapping[str, Any], key: str) -> int:
@@ -256,7 +302,7 @@ def run_endpoint(args: argparse.Namespace) -> int:
     peer_window: Any | None = None
     kernel: AclDeviceKernel | None = None
     channel: ControlChannel | None = None
-    report: DeviceLoopReport | T05DeviceLoopReport | T06DeviceLoopReport | None = None
+    report: DeviceLoopReport | T05DeviceLoopReport | T06DeviceLoopReport | T07DeviceLoopReport | None = None
     kernel_elapsed_ns = 0
     hot_path: dict[str, int] = {
         "control_bytes": 0,
@@ -423,7 +469,7 @@ def _endpoint_command(role: EndpointRole, device_id: int, access_device_id: int,
 
 def _report_from_artifact(
     artifact: Mapping[str, Any], case_id: str
-) -> DeviceLoopReport | T05DeviceLoopReport | T06DeviceLoopReport:
+) -> DeviceLoopReport | T05DeviceLoopReport | T06DeviceLoopReport | T07DeviceLoopReport:
     raw = artifact.get("device_loop", {}).get("report")
     if not isinstance(raw, Mapping):
         raise ValueError(f"endpoint is missing a {case_id} device report")
@@ -433,7 +479,7 @@ def _report_from_artifact(
 
 def _observation_from_artifacts(
     args: argparse.Namespace, artifacts: Mapping[EndpointRole, Mapping[str, Any]]
-) -> T04Observation | T05Observation | T06Observation:
+) -> T04Observation | T05Observation | T06Observation | T07Observation:
     case_id = getattr(args, "case_id", T04_CASE_ID)
     attention_loop = artifacts[EndpointRole.ATTENTION]["device_loop"]
     service_loop = artifacts[EndpointRole.WSE_SURROGATE]["device_loop"]
@@ -500,29 +546,54 @@ def _observation_from_artifacts(
             output_fence=T05_OUTPUT_FENCE,
             **common,
         )
-    if not isinstance(driver_report, T06DeviceLoopReport) or not isinstance(service_report, T06DeviceLoopReport):
-        raise ValueError("T06 artifacts contain the wrong report type")
-    return T06Observation(
-        slot_count=T06_SLOT_COUNT,
-        max_inflight=T06_MAX_INFLIGHT,
-        sequence_count=T06_SEQUENCE_COUNT,
-        payload_bytes=T06_PAYLOAD_BYTES,
-        attempted_submissions=driver_report.submissions + driver_report.no_credit_events,
-        no_credit_events=driver_report.no_credit_events,
-        pending_requests=driver_report.pending_requests,
-        terminal_tasks=driver_report.terminal_tasks,
-        credits_acquired=driver_report.credits_acquired,
-        credits_returned=driver_report.credits_returned,
-        submission_retry_spins=driver_report.submission_retry_spins,
-        service_pause_observed=bool(driver_report.service_pause_observed and service_report.service_pause_observed),
-        service_resume_observed=bool(driver_report.service_resume_observed and service_report.service_resume_observed),
-        progress_after_resume=min(driver_report.progress_after_resume, service_report.progress_after_resume),
-        third_request_outcome=T06_THIRD_REQUEST_OUTCOME,
-        backpressure_wait=T06_BACKPRESSURE_WAIT,
-        driver_context=T06_DEVICE_CONTEXT,
-        service_context=T06_DEVICE_CONTEXT,
-        input_fence=T06_INPUT_FENCE,
-        output_fence=T06_OUTPUT_FENCE,
+    if case_id == T06_CASE_ID:
+        if not isinstance(driver_report, T06DeviceLoopReport) or not isinstance(service_report, T06DeviceLoopReport):
+            raise ValueError("T06 artifacts contain the wrong report type")
+        return T06Observation(
+            slot_count=T06_SLOT_COUNT,
+            max_inflight=T06_MAX_INFLIGHT,
+            sequence_count=T06_SEQUENCE_COUNT,
+            payload_bytes=T06_PAYLOAD_BYTES,
+            attempted_submissions=driver_report.submissions + driver_report.no_credit_events,
+            no_credit_events=driver_report.no_credit_events,
+            pending_requests=driver_report.pending_requests,
+            terminal_tasks=driver_report.terminal_tasks,
+            credits_acquired=driver_report.credits_acquired,
+            credits_returned=driver_report.credits_returned,
+            submission_retry_spins=driver_report.submission_retry_spins,
+            service_pause_observed=bool(driver_report.service_pause_observed and service_report.service_pause_observed),
+            service_resume_observed=bool(
+                driver_report.service_resume_observed and service_report.service_resume_observed
+            ),
+            progress_after_resume=min(driver_report.progress_after_resume, service_report.progress_after_resume),
+            third_request_outcome=T06_THIRD_REQUEST_OUTCOME,
+            backpressure_wait=T06_BACKPRESSURE_WAIT,
+            driver_context=T06_DEVICE_CONTEXT,
+            service_context=T06_DEVICE_CONTEXT,
+            input_fence=T06_INPUT_FENCE,
+            output_fence=T06_OUTPUT_FENCE,
+            **common,
+        )
+    if not isinstance(driver_report, T07DeviceLoopReport) or not isinstance(service_report, T07DeviceLoopReport):
+        raise ValueError("T07 artifacts contain the wrong report type")
+    return T07Observation(
+        slot_count=T07_SLOT_COUNT,
+        max_inflight=T07_MAX_INFLIGHT,
+        sequence_count=T07_SEQUENCE_COUNT,
+        payload_bytes=T07_PAYLOAD_BYTES,
+        unique_tail_markers_validated=driver_report.unique_tail_markers_validated,
+        immediate_completion_checks=driver_report.immediate_completion_checks,
+        post_completion_delay_cycles=driver_report.post_completion_delay_cycles,
+        stale_payload_errors=driver_report.stale_payload_errors + service_report.stale_payload_errors,
+        incomplete_payload_errors=(driver_report.incomplete_payload_errors + service_report.incomplete_payload_errors),
+        premature_completion_errors=(
+            driver_report.premature_completion_errors + service_report.premature_completion_errors
+        ),
+        completion_check=T07_COMPLETION_CHECK,
+        driver_context=T07_DEVICE_CONTEXT,
+        service_context=T07_DEVICE_CONTEXT,
+        input_fence=T07_INPUT_FENCE,
+        output_fence=T07_OUTPUT_FENCE,
         **common,
     )
 
@@ -560,7 +631,7 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
             "success": endpoint_success,
         }
 
-    observation: T04Observation | T05Observation | T06Observation | None = None
+    observation: T04Observation | T05Observation | T06Observation | T07Observation | None = None
     with suppress(KeyError, TypeError, ValueError):
         observation = _observation_from_artifacts(args, artifacts)
 
@@ -573,9 +644,12 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
     elif case_id == T05_CASE_ID:
         sequence_count = T05_SEQUENCE_COUNT
         transferred_bytes = (T05_SEQUENCE_COUNT // T05_SLOT_COUNT) * sum(T05_PAYLOAD_BYTES) * 2
-    else:
+    elif case_id == T06_CASE_ID:
         sequence_count = T06_SEQUENCE_COUNT
         transferred_bytes = T06_SEQUENCE_COUNT * T06_PAYLOAD_BYTES * 2
+    else:
+        sequence_count = T07_SEQUENCE_COUNT
+        transferred_bytes = T07_SEQUENCE_COUNT * T07_PAYLOAD_BYTES * 2
     attempted_submissions = (
         observation.attempted_submissions if isinstance(observation, T06Observation) else sequence_count
     )
@@ -688,7 +762,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--kernel-dir", type=Path, required=True)
     run.add_argument("--host", default="127.0.0.1")
     run.add_argument("--run-id", default=f"stage1b-{uuid.uuid4().hex}")
-    run.add_argument("--case-id", choices=(T04_CASE_ID, T05_CASE_ID, T06_CASE_ID), default=T04_CASE_ID)
+    run.add_argument(
+        "--case-id",
+        choices=(T04_CASE_ID, T05_CASE_ID, T06_CASE_ID, T07_CASE_ID),
+        default=T04_CASE_ID,
+    )
     run.add_argument("--generation", type=int, default=DEFAULT_GENERATION)
     run.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     run.add_argument("--start-delay", type=float, default=DEFAULT_START_DELAY_SECONDS)
@@ -703,7 +781,11 @@ def build_parser() -> argparse.ArgumentParser:
     endpoint.add_argument("--host", required=True)
     endpoint.add_argument("--port", type=int, required=True)
     endpoint.add_argument("--run-id", required=True)
-    endpoint.add_argument("--case-id", choices=(T04_CASE_ID, T05_CASE_ID, T06_CASE_ID), required=True)
+    endpoint.add_argument(
+        "--case-id",
+        choices=(T04_CASE_ID, T05_CASE_ID, T06_CASE_ID, T07_CASE_ID),
+        required=True,
+    )
     endpoint.add_argument("--generation", type=int, required=True)
     endpoint.add_argument("--timeout", type=float, required=True)
     return parser
