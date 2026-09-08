@@ -93,7 +93,12 @@ def test_aggregate_result_preserves_c1_boundary_after_t04(tmp_path):
     assert result["success"] is True
     assert result["stage1b_progress"] == "T04_PASS"
     assert result["data_results"]["T04"]["passed"] == T04_SEQUENCE_COUNT
-    assert result["host_hot_path"] == {"completion_messages": 0, "payload_bytes": 0, "task_messages": 0}
+    assert result["host_hot_path"] == {
+        "completion_messages": 0,
+        "control_messages": 0,
+        "payload_bytes": 0,
+        "task_messages": 0,
+    }
     assert result["capability_level"] == "C1"
     assert result["c2_status"] == "NOT_ESTABLISHED"
     assert result["npu_wse_capability_level"] == "NOT_ESTABLISHED"

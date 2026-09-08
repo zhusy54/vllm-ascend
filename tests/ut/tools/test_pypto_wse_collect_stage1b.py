@@ -51,7 +51,12 @@ def _write_run(path: Path, start_order: str, *, raw_handle: bool = False) -> Non
         "claim_scope": "NPU_SURROGATE_ONLY",
         "data_results": {"T04": {"passed": T04_SEQUENCE_COUNT, "status": "PASS"}},
         "host_bounce_bytes": 0,
-        "host_hot_path": {"completion_messages": 0, "payload_bytes": 0, "task_messages": 0},
+        "host_hot_path": {
+            "completion_messages": 0,
+            "control_messages": 0,
+            "payload_bytes": 0,
+            "task_messages": 0,
+        },
         "npu_wse_capability_level": "NOT_ESTABLISHED",
         "observation": observation.to_dict(),
         "resource_cleanup": "VERIFIED",

@@ -338,6 +338,9 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
             validated_sequences=driver_report.processed,
             input_fence=T04_INPUT_FENCE,
             output_fence=T04_OUTPUT_FENCE,
+            host_hot_path_control_messages=sum(
+                int(artifacts[role]["device_loop"]["hot_path"]["control_messages"]) for role in EndpointRole
+            ),
             host_hot_path_task_messages=sum(
                 int(artifacts[role]["device_loop"]["hot_path"]["task_messages"]) for role in EndpointRole
             ),
@@ -382,6 +385,7 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
         "host_bounce_bytes": observation.host_bounce_bytes if observation is not None else None,
         "host_hot_path": {
             "completion_messages": observation.host_hot_path_completion_messages if observation is not None else None,
+            "control_messages": observation.host_hot_path_control_messages if observation is not None else None,
             "payload_bytes": observation.host_hot_path_payload_bytes if observation is not None else None,
             "task_messages": observation.host_hot_path_task_messages if observation is not None else None,
         },

@@ -80,7 +80,12 @@ def _validate_success(result: Mapping[str, Any], endpoints: Mapping[str, Mapping
         raise ValueError("successful run has an unsafe claim scope")
     if result.get("npu_wse_capability_level") != "NOT_ESTABLISHED":
         raise ValueError("successful run overclaims real NPU-WSE capability")
-    if result.get("host_hot_path") != {"completion_messages": 0, "payload_bytes": 0, "task_messages": 0}:
+    if result.get("host_hot_path") != {
+        "completion_messages": 0,
+        "control_messages": 0,
+        "payload_bytes": 0,
+        "task_messages": 0,
+    }:
         raise ValueError("successful T04 run contains Host hot-path traffic")
     if result.get("resource_cleanup") != "VERIFIED" or result.get("host_bounce_bytes") != 0:
         raise ValueError("successful run is missing cleanup or zero-bounce proof")

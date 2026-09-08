@@ -73,6 +73,7 @@ class T04Observation:
     validated_sequences: int
     input_fence: str
     output_fence: str
+    host_hot_path_control_messages: int
     host_hot_path_task_messages: int
     host_hot_path_completion_messages: int
     host_hot_path_payload_bytes: int
@@ -100,6 +101,7 @@ class T04Observation:
             self.device_submissions,
             self.device_completions,
             self.validated_sequences,
+            self.host_hot_path_control_messages,
             self.host_hot_path_task_messages,
             self.host_hot_path_completion_messages,
             self.host_hot_path_payload_bytes,
@@ -130,6 +132,7 @@ class T04Observation:
                 self.validated_sequences == T04_SEQUENCE_COUNT,
                 self.input_fence == T04_INPUT_FENCE,
                 self.output_fence == T04_OUTPUT_FENCE,
+                self.host_hot_path_control_messages == 0,
                 self.host_hot_path_task_messages == 0,
                 self.host_hot_path_completion_messages == 0,
                 self.host_hot_path_payload_bytes == 0,
