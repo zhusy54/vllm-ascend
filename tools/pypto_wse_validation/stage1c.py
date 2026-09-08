@@ -243,7 +243,12 @@ def run_endpoint(args: argparse.Namespace) -> int:
         "idempotent_close_successes": 0,
         "duplicate_close_rejections": 0,
     }
-    metrics = {"kernel_elapsed_ns": 0, "host_cpu_ns": 0, "host_wall_ns": 0}
+    metrics = {
+        "kernel_elapsed_ns": 0,
+        "host_cpu_ns": 0,
+        "host_wall_ns": 0,
+        "initial_rss_bytes": initial_rss,
+    }
     error: dict[str, str] | None = None
     manifest_evidence: dict[str, Any] | None = None
     deadline = time.monotonic() + args.timeout
@@ -279,12 +284,18 @@ def run_endpoint(args: argparse.Namespace) -> int:
             cleanup["device_kernel"] = "OPEN"
             kernel.launch(_kernel_arguments(case.case_id, local_window.address, peer_window.address, args.generation))
             protocol.exchange("READY", {"case_id": case.case_id, "device_kernel_launched": True})
+            steady_state_rss = _rss_bytes()
+            metrics["steady_state_rss_bytes"] = steady_state_rss
+            metrics["runtime_setup_growth_bytes"] = max(0, steady_state_rss - initial_rss)
             hot_start = channel.evidence()
             cpu_start = time.process_time_ns()
             wall_start = time.perf_counter_ns()
             metrics["kernel_elapsed_ns"] = kernel.synchronize()
             metrics["host_wall_ns"] = time.perf_counter_ns() - wall_start
             metrics["host_cpu_ns"] = time.process_time_ns() - cpu_start
+            post_kernel_rss = _rss_bytes()
+            metrics["post_kernel_rss_bytes"] = post_kernel_rss
+            metrics["host_memory_growth_bytes"] = max(0, post_kernel_rss - steady_state_rss)
             hot_end = channel.evidence()
             hot_path["control_messages"] = _message_count(hot_end) - _message_count(hot_start)
             hot_path["control_bytes"] = _counter_delta(hot_end, hot_start, "sent_bytes")
@@ -348,7 +359,7 @@ def run_endpoint(args: argparse.Namespace) -> int:
         metrics["host_cpu_utilization_pct"] = (
             min(100.0, 100.0 * int(metrics["host_cpu_ns"]) / wall_ns) if wall_ns else 0.0
         )
-        metrics["host_memory_growth_bytes"] = max(0, final_rss - initial_rss)
+        metrics["process_residual_growth_bytes"] = max(0, final_rss - initial_rss)
         evidence = {
             "case_id": case.case_id,
             "cleanup": cleanup,
