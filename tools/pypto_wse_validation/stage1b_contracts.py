@@ -43,6 +43,23 @@ T05_DEVICE_CONTEXT = "AIV_DEVICE_KERNEL"
 T05_INPUT_FENCE = "st_dev_payload_metadata+dsb_all+st_dev_submission"
 T05_OUTPUT_FENCE = "st_dev_output_metadata+dsb_all+st_dev_completion"
 
+T06_CASE_ID = "T06"
+T06_SEQUENCE_COUNT = 4
+T06_SLOT_COUNT = 2
+T06_MAX_INFLIGHT = 2
+T06_PAYLOAD_BYTES = 4 * 1024
+T06_SLOT_STRIDE = T05_SLOT_STRIDE
+T06_CONTROL_OFFSET = T06_SLOT_COUNT * T06_SLOT_STRIDE
+T06_CONTROL_BYTES = (T06_SLOT_COUNT * 2 * 64) + 64 + (3 * 64)
+T06_WINDOW_BYTES = T06_CONTROL_OFFSET + T06_CONTROL_BYTES
+T06_DRIVER_KERNEL = "pypto_stage1b_t06_driver_0_mix_aiv"
+T06_SERVICE_KERNEL = "pypto_stage1b_t06_service_0_mix_aiv"
+T06_DEVICE_CONTEXT = "AIV_DEVICE_KERNEL"
+T06_INPUT_FENCE = T05_INPUT_FENCE
+T06_OUTPUT_FENCE = T05_OUTPUT_FENCE
+T06_THIRD_REQUEST_OUTCOME = "NO_CREDIT"
+T06_BACKPRESSURE_WAIT = "PENDING_STATE_NO_SUBMIT_RETRY"
+
 
 @dataclass(frozen=True)
 class DeviceLoopReport:
@@ -92,6 +109,45 @@ class T05DeviceLoopReport:
     def from_bytes(cls, payload: bytes) -> T05DeviceLoopReport:
         if len(payload) != cls._STRUCT.size:
             raise ContractError(f"T05 device report must be {cls._STRUCT.size} bytes")
+        return cls(*cls._STRUCT.unpack(payload))
+
+    def to_dict(self) -> dict[str, int]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class T06DeviceLoopReport:
+    processed: int
+    validation_errors: int
+    sequence_errors: int
+    generation_errors: int
+    checksum_errors: int
+    marker_errors: int
+    timeouts: int
+    elapsed_cycles: int
+    slot0_processed: int
+    slot1_processed: int
+    credits_acquired: int
+    terminal_tasks: int
+    credits_returned: int
+    max_inflight: int
+    slot_overwrite_errors: int
+    no_credit_events: int
+    pending_requests: int
+    submission_retry_spins: int
+    service_pause_observed: int
+    service_resume_observed: int
+    progress_after_resume: int
+    peak_queue_depth: int
+    submissions: int
+    completions: int
+
+    _STRUCT = struct.Struct("<" + ("Q" * 24))
+
+    @classmethod
+    def from_bytes(cls, payload: bytes) -> T06DeviceLoopReport:
+        if len(payload) != cls._STRUCT.size:
+            raise ContractError(f"T06 device report must be {cls._STRUCT.size} bytes")
         return cls(*cls._STRUCT.unpack(payload))
 
     def to_dict(self) -> dict[str, int]:
@@ -370,5 +426,185 @@ class T05Observation:
             observation = cls(**data)
         except (KeyError, TypeError, ValueError) as exc:
             raise ContractError(f"invalid T05 observation: {exc}") from exc
+        observation.validate()
+        return observation
+
+
+@dataclass(frozen=True)
+class T06Observation:
+    case_id: str
+    generation: int
+    slot_count: int
+    max_inflight: int
+    sequence_count: int
+    payload_bytes: int
+    attempted_submissions: int
+    device_submissions: int
+    device_completions: int
+    validated_sequences: int
+    no_credit_events: int
+    pending_requests: int
+    terminal_tasks: int
+    credits_acquired: int
+    credits_returned: int
+    submission_retry_spins: int
+    service_pause_observed: bool
+    service_resume_observed: bool
+    progress_after_resume: int
+    third_request_outcome: str
+    backpressure_wait: str
+    backend: str
+    transport_scope: TransportScope
+    handle_kind: str
+    driver_kernel: str
+    service_kernel: str
+    driver_context: str
+    service_context: str
+    driver_launches: int
+    service_launches: int
+    input_fence: str
+    output_fence: str
+    host_hot_path_control_messages: int
+    host_hot_path_task_messages: int
+    host_hot_path_completion_messages: int
+    host_hot_path_payload_bytes: int
+    host_bounce_bytes: int
+    fallback_used: bool
+    driver_report: T06DeviceLoopReport
+    service_report: T06DeviceLoopReport
+    driver_binary_sha256: str
+    service_binary_sha256: str
+
+    def validate(self) -> None:
+        if self.case_id != T06_CASE_ID:
+            raise ContractError(f"case_id must be {T06_CASE_ID}")
+        if self.generation < 1:
+            raise ContractError("generation must be positive")
+        if self.slot_count != T06_SLOT_COUNT:
+            raise ContractError(f"T06 must use {T06_SLOT_COUNT} slots")
+        if self.max_inflight != T06_MAX_INFLIGHT:
+            raise ContractError(f"T06 max_inflight must be {T06_MAX_INFLIGHT}")
+        if self.sequence_count != T06_SEQUENCE_COUNT:
+            raise ContractError(f"T06 must run {T06_SEQUENCE_COUNT} sequences")
+        if self.payload_bytes != T06_PAYLOAD_BYTES:
+            raise ContractError(f"T06 payload must be {T06_PAYLOAD_BYTES} bytes")
+        counters = (
+            self.attempted_submissions,
+            self.device_submissions,
+            self.device_completions,
+            self.validated_sequences,
+            self.no_credit_events,
+            self.pending_requests,
+            self.terminal_tasks,
+            self.credits_acquired,
+            self.credits_returned,
+            self.submission_retry_spins,
+            self.progress_after_resume,
+            self.driver_launches,
+            self.service_launches,
+            self.host_hot_path_control_messages,
+            self.host_hot_path_task_messages,
+            self.host_hot_path_completion_messages,
+            self.host_hot_path_payload_bytes,
+            self.host_bounce_bytes,
+        )
+        if min(counters) < 0:
+            raise ContractError("T06 counters must be non-negative")
+        if len(self.driver_binary_sha256) != 64 or len(self.service_binary_sha256) != 64:
+            raise ContractError("T06 kernel hashes must be SHA-256 digests")
+
+    @staticmethod
+    def _common_report_passed(report: T06DeviceLoopReport) -> bool:
+        return all(
+            (
+                report.processed == T06_SEQUENCE_COUNT,
+                report.validation_errors == 0,
+                report.sequence_errors == 0,
+                report.generation_errors == 0,
+                report.checksum_errors == 0,
+                report.marker_errors == 0,
+                report.timeouts == 0,
+                report.elapsed_cycles > 0,
+                report.slot0_processed == T06_SEQUENCE_COUNT // 2,
+                report.slot1_processed == T06_SEQUENCE_COUNT // 2,
+                report.terminal_tasks == T06_SEQUENCE_COUNT,
+                report.max_inflight == T06_MAX_INFLIGHT,
+                report.slot_overwrite_errors == 0,
+                report.no_credit_events == 1,
+                report.pending_requests == 1,
+                report.submission_retry_spins == 0,
+                report.service_pause_observed == 1,
+                report.service_resume_observed == 1,
+                report.progress_after_resume == T06_SEQUENCE_COUNT,
+                report.peak_queue_depth == T06_MAX_INFLIGHT,
+                report.submissions == T06_SEQUENCE_COUNT,
+                report.completions == T06_SEQUENCE_COUNT,
+            )
+        )
+
+    @property
+    def passed(self) -> bool:
+        self.validate()
+        return all(
+            (
+                self.attempted_submissions == T06_SEQUENCE_COUNT + 1,
+                self.device_submissions == T06_SEQUENCE_COUNT,
+                self.device_completions == T06_SEQUENCE_COUNT,
+                self.validated_sequences == T06_SEQUENCE_COUNT,
+                self.no_credit_events == 1,
+                self.pending_requests == 1,
+                self.terminal_tasks == T06_SEQUENCE_COUNT,
+                self.credits_acquired == T06_SEQUENCE_COUNT,
+                self.credits_returned == T06_SEQUENCE_COUNT,
+                self.submission_retry_spins == 0,
+                self.service_pause_observed,
+                self.service_resume_observed,
+                self.progress_after_resume == T06_SEQUENCE_COUNT,
+                self.third_request_outcome == T06_THIRD_REQUEST_OUTCOME,
+                self.backpressure_wait == T06_BACKPRESSURE_WAIT,
+                self.backend == STAGE1A_BACKEND,
+                self.transport_scope is TransportScope.HOST_LOCAL,
+                self.handle_kind == STAGE1A_HANDLE_KIND,
+                self.driver_kernel == T06_DRIVER_KERNEL,
+                self.service_kernel == T06_SERVICE_KERNEL,
+                self.driver_context == T06_DEVICE_CONTEXT,
+                self.service_context == T06_DEVICE_CONTEXT,
+                self.driver_launches == 1,
+                self.service_launches == 1,
+                self.input_fence == T06_INPUT_FENCE,
+                self.output_fence == T06_OUTPUT_FENCE,
+                self.host_hot_path_control_messages == 0,
+                self.host_hot_path_task_messages == 0,
+                self.host_hot_path_completion_messages == 0,
+                self.host_hot_path_payload_bytes == 0,
+                self.host_bounce_bytes == 0,
+                not self.fallback_used,
+                self._common_report_passed(self.driver_report),
+                self._common_report_passed(self.service_report),
+                self.driver_report.credits_acquired == T06_SEQUENCE_COUNT,
+                self.driver_report.credits_returned == T06_SEQUENCE_COUNT,
+                self.service_report.credits_acquired == 0,
+                self.service_report.credits_returned == 0,
+            )
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        self.validate()
+        result = asdict(self)
+        result["transport_scope"] = self.transport_scope.value
+        result["passed"] = self.passed
+        return result
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> T06Observation:
+        data = dict(value)
+        data.pop("passed", None)
+        try:
+            data["transport_scope"] = TransportScope(data["transport_scope"])
+            data["driver_report"] = T06DeviceLoopReport(**data["driver_report"])
+            data["service_report"] = T06DeviceLoopReport(**data["service_report"])
+            observation = cls(**data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ContractError(f"invalid T06 observation: {exc}") from exc
         observation.validate()
         return observation
