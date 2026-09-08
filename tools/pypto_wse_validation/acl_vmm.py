@@ -80,6 +80,13 @@ class DeviceTransformEvidence:
     workspace_bytes: int
 
 
+@dataclass(frozen=True)
+class StaleImportProbe:
+    api: str
+    rejected: bool
+    result_code: int
+
+
 class AclVmmRuntime:
     """Own one process-local ACL context and its VMM operations."""
 
@@ -208,6 +215,34 @@ class AclVmmRuntime:
     def import_window(self, exported: VmmExport, *, peer_device_id: int) -> ImportedVmmWindow:
         self._require_initialized()
         return ImportedVmmWindow.create(self, exported, peer_device_id=peer_device_id)
+
+    def probe_stale_import(self, exported: VmmExport) -> StaleImportProbe:
+        """Probe an old shareable handle without enabling peer access or mapping it."""
+        self._require_initialized()
+        if exported.mapping_bytes <= 0 or exported.shareable_handle <= 0:
+            raise ValueError("import descriptor must contain positive values")
+        imported_handle = ctypes.c_void_p()
+        result = self._library.aclrtMemImportFromShareableHandle(
+            exported.shareable_handle,
+            self.device_id,
+            ctypes.byref(imported_handle),
+        )
+        if result != ACL_SUCCESS:
+            return StaleImportProbe(
+                api="aclrtMemImportFromShareableHandle",
+                rejected=True,
+                result_code=int(result),
+            )
+        if imported_handle.value:
+            self._check(
+                "aclrtFreePhysical stale import probe",
+                self._library.aclrtFreePhysical(imported_handle),
+            )
+        return StaleImportProbe(
+            api="aclrtMemImportFromShareableHandle",
+            rejected=False,
+            result_code=ACL_SUCCESS,
+        )
 
     def _reserve_and_map(self, handle: int, mapping_bytes: int) -> int:
         address = ctypes.c_void_p()

@@ -15,6 +15,7 @@ from tools.pypto_wse_validation.acl_vmm import (
     AclError,
     AclnnXorTransform,
     AclVmmRuntime,
+    StaleImportProbe,
     VmmExport,
     _AclMemAccessDesc,
     _AclMemLocation,
@@ -159,6 +160,34 @@ def test_allocate_export_and_import_use_vmm_and_peer_access():
     finally:
         peer.close()
         owner.close()
+        runtime.close()
+
+
+def test_stale_import_probe_records_rejection_without_enabling_peer_access():
+    runtime, library = _runtime()
+    library.results["aclrtMemImportFromShareableHandle"] = 145001
+    try:
+        probe = runtime.probe_stale_import(VmmExport(device_id=3, mapping_bytes=4096, shareable_handle=0xABC))
+        assert probe == StaleImportProbe(
+            api="aclrtMemImportFromShareableHandle",
+            rejected=True,
+            result_code=145001,
+        )
+        names = [name for name, _ in library.calls]
+        assert "aclrtDeviceEnablePeerAccess" not in names
+        assert "aclrtFreePhysical" not in names
+    finally:
+        runtime.close()
+
+
+def test_stale_import_probe_releases_unexpected_success():
+    runtime, library = _runtime()
+    try:
+        probe = runtime.probe_stale_import(VmmExport(device_id=3, mapping_bytes=4096, shareable_handle=0xABC))
+        assert probe.rejected is False
+        assert probe.result_code == 0
+        assert sum(name == "aclrtFreePhysical" for name, _ in library.calls) == 1
+    finally:
         runtime.close()
 
 
