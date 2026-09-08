@@ -80,6 +80,8 @@ class TransferObservation:
     expected_checksum: str
     observed_checksum: str
     host_bounce_bytes: int
+    host_source_staging_bytes: int
+    host_verification_bytes: int
     fallback_used: bool
     source_filled: bool
     destination_verified: bool
@@ -94,7 +96,9 @@ class TransferObservation:
             raise ContractError("sequence_id must be positive")
         if len(self.expected_checksum) != 64 or len(self.observed_checksum) != 64:
             raise ContractError("checksums must be SHA-256 hex digests")
-        if self.host_bounce_bytes < 0 or self.elapsed_ns < 0:
+        if min(self.host_bounce_bytes, self.host_source_staging_bytes, self.host_verification_bytes) < 0:
+            raise ContractError("host byte counters must be non-negative")
+        if self.elapsed_ns < 0:
             raise ContractError("byte and elapsed counters must be non-negative")
 
     @property
@@ -111,6 +115,8 @@ class TransferObservation:
                 self.visibility_fence == STAGE1A_FENCE_API,
                 self.expected_checksum == self.observed_checksum,
                 self.host_bounce_bytes == 0,
+                self.host_source_staging_bytes == self.payload_bytes,
+                self.host_verification_bytes == self.payload_bytes,
                 not self.fallback_used,
                 self.source_filled,
                 self.destination_verified,
@@ -126,6 +132,21 @@ class TransferObservation:
         result["transport_scope"] = self.transport_scope.value
         result["passed"] = self.passed
         return result
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> TransferObservation:
+        data = dict(value)
+        data.pop("passed", None)
+        try:
+            data["direction"] = TransferDirection(data["direction"])
+            data["source_memory"] = MemoryKind(data["source_memory"])
+            data["destination_memory"] = MemoryKind(data["destination_memory"])
+            data["transport_scope"] = TransportScope(data["transport_scope"])
+            observation = cls(**data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ContractError(f"invalid transfer observation: {exc}") from exc
+        observation.validate()
+        return observation
 
 
 def stage1a_matrix_complete(observations: tuple[TransferObservation, ...]) -> bool:

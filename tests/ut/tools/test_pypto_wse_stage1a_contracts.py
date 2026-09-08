@@ -41,6 +41,8 @@ def _observation(direction: TransferDirection, size: int) -> TransferObservation
         expected_checksum=checksum,
         observed_checksum=checksum,
         host_bounce_bytes=0,
+        host_source_staging_bytes=size,
+        host_verification_bytes=size,
         fallback_used=False,
         source_filled=True,
         destination_verified=True,
@@ -80,6 +82,8 @@ def test_handle_evidence_is_redacted_and_stable():
         {"transport_scope": TransportScope.SIMULATION},
         {"transfer_api": "aclrtMemcpy:ACL_MEMCPY_HOST_TO_DEVICE"},
         {"host_bounce_bytes": 64},
+        {"host_source_staging_bytes": 0},
+        {"host_verification_bytes": 0},
         {"fallback_used": True},
         {"observed_checksum": "0" * 64},
         {"source_filled": False},
@@ -93,5 +97,6 @@ def test_observation_fails_closed_when_c1_proof_is_missing(change):
 def test_stage1a_matrix_requires_both_directions_and_all_base_sizes():
     complete = tuple(_observation(direction, size) for direction in TransferDirection for size in BASE_PAYLOAD_SIZES)
     assert stage1a_matrix_complete(complete)
+    assert TransferObservation.from_dict(complete[0].to_dict()) == complete[0]
     assert not stage1a_matrix_complete(complete[:-1])
     assert not stage1a_matrix_complete(complete + (complete[0],))
