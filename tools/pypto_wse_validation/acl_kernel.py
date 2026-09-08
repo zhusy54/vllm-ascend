@@ -150,6 +150,14 @@ class AclDeviceKernel:
         )
         self._launched = True
 
+    @property
+    def launched(self) -> bool:
+        return self._launched
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
     def synchronize(self) -> int:
         if not self._launched:
             raise AclError("AIV kernel has not been launched")
