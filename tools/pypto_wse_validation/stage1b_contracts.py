@@ -76,6 +76,23 @@ T07_INPUT_FENCE = "st_dev_large_payload_markers+dsb_all+st_dev_descriptor+dsb_al
 T07_OUTPUT_FENCE = "st_dev_large_output_markers+dsb_all+st_dev_completion_metadata+dsb_all+st_dev_completion"
 T07_COMPLETION_CHECK = "IMMEDIATE_AFTER_SIGNAL_NO_DELAY"
 
+T08_CASE_ID = "T08"
+T08_BASELINE_SEQUENCE_COUNT = 4
+T08_NEXT_SEQUENCE_COUNT = 1
+T08_SLOT_COUNT = 1
+T08_MAX_INFLIGHT = 1
+T08_PAYLOAD_BYTES = 4 * 1024
+T08_CONTROL_OFFSET = 1024 * 1024
+T08_CONTROL_BYTES = (2 * 2 * 64) + 64 + (3 * 64)
+T08_WINDOW_BYTES = T08_CONTROL_OFFSET + T08_CONTROL_BYTES
+T08_DRIVER_KERNEL = "pypto_stage1b_t08_driver_0_mix_aiv"
+T08_SERVICE_KERNEL = "pypto_stage1b_t08_service_0_mix_aiv"
+T08_DEVICE_CONTEXT = "AIV_DEVICE_KERNEL"
+T08_INPUT_FENCE = "st_dev_payload_metadata+dsb_all+st_dev_submission"
+T08_OUTPUT_FENCE = "st_dev_output_metadata+dsb_all+st_dev_completion"
+T08_STALE_STATUS = "STALE_GENERATION"
+T08_HANDLE_PROBE_API = "aclrtMemImportFromShareableHandle"
+
 
 @dataclass(frozen=True)
 class DeviceLoopReport:
@@ -205,6 +222,45 @@ class T07DeviceLoopReport:
     def from_bytes(cls, payload: bytes) -> T07DeviceLoopReport:
         if len(payload) != cls._STRUCT.size:
             raise ContractError(f"T07 device report must be {cls._STRUCT.size} bytes")
+        return cls(*cls._STRUCT.unpack(payload))
+
+    def to_dict(self) -> dict[str, int]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class T08DeviceLoopReport:
+    processed: int
+    validation_errors: int
+    sequence_errors: int
+    generation_errors: int
+    checksum_errors: int
+    marker_errors: int
+    timeouts: int
+    elapsed_cycles: int
+    submissions: int
+    completions: int
+    stale_descriptor_injections: int
+    stale_descriptor_rejections: int
+    stale_completion_injections: int
+    stale_completion_rejections: int
+    old_completion_credit_releases: int
+    current_slot_preserved: int
+    credits_acquired: int
+    credits_returned: int
+    terminal_tasks: int
+    progress_after_stale: int
+    input_fences: int
+    output_fences: int
+    mode: int
+    reserved: int
+
+    _STRUCT = struct.Struct("<" + ("Q" * 24))
+
+    @classmethod
+    def from_bytes(cls, payload: bytes) -> T08DeviceLoopReport:
+        if len(payload) != cls._STRUCT.size:
+            raise ContractError(f"T08 device report must be {cls._STRUCT.size} bytes")
         return cls(*cls._STRUCT.unpack(payload))
 
     def to_dict(self) -> dict[str, int]:
@@ -835,5 +891,231 @@ class T07Observation:
             observation = cls(**data)
         except (KeyError, TypeError, ValueError) as exc:
             raise ContractError(f"invalid T07 observation: {exc}") from exc
+        observation.validate()
+        return observation
+
+
+@dataclass(frozen=True)
+class T08Observation:
+    case_id: str
+    generation: int
+    next_generation: int
+    baseline_sequence_count: int
+    next_sequence_count: int
+    slot_count: int
+    max_inflight: int
+    payload_bytes: int
+    device_submissions: int
+    device_completions: int
+    validated_sequences: int
+    stale_descriptor_injections: int
+    stale_descriptor_rejections: int
+    stale_completion_injections: int
+    stale_completion_rejections: int
+    old_completion_credit_releases: int
+    current_slot_preserved: bool
+    progress_after_stale: int
+    old_handle_rejected_before_reallocate: int
+    old_handle_rejected_after_reallocate: int
+    old_handle_import_successes: int
+    new_handle_collisions: int
+    handle_probe_api: str
+    backend: str
+    transport_scope: TransportScope
+    handle_kind: str
+    driver_kernel: str
+    service_kernel: str
+    driver_context: str
+    service_context: str
+    driver_launches: int
+    service_launches: int
+    input_fence: str
+    output_fence: str
+    host_hot_path_control_messages: int
+    host_hot_path_task_messages: int
+    host_hot_path_completion_messages: int
+    host_hot_path_payload_bytes: int
+    host_bounce_bytes: int
+    fallback_used: bool
+    baseline_driver_report: T08DeviceLoopReport
+    baseline_service_report: T08DeviceLoopReport
+    next_driver_report: T08DeviceLoopReport
+    next_service_report: T08DeviceLoopReport
+    driver_binary_sha256: str
+    service_binary_sha256: str
+
+    def validate(self) -> None:
+        if self.case_id != T08_CASE_ID:
+            raise ContractError(f"case_id must be {T08_CASE_ID}")
+        if self.generation < 1 or self.next_generation != self.generation + 1:
+            raise ContractError("T08 generations must be consecutive and positive")
+        if self.baseline_sequence_count != T08_BASELINE_SEQUENCE_COUNT:
+            raise ContractError(f"T08 baseline must run {T08_BASELINE_SEQUENCE_COUNT} sequences")
+        if self.next_sequence_count != T08_NEXT_SEQUENCE_COUNT:
+            raise ContractError(f"T08 next generation must run {T08_NEXT_SEQUENCE_COUNT} sequence")
+        if self.slot_count != T08_SLOT_COUNT or self.max_inflight != T08_MAX_INFLIGHT:
+            raise ContractError("T08 must use one slot and one credit")
+        if self.payload_bytes != T08_PAYLOAD_BYTES:
+            raise ContractError(f"T08 payload must be {T08_PAYLOAD_BYTES} bytes")
+        counters = (
+            self.device_submissions,
+            self.device_completions,
+            self.validated_sequences,
+            self.stale_descriptor_injections,
+            self.stale_descriptor_rejections,
+            self.stale_completion_injections,
+            self.stale_completion_rejections,
+            self.old_completion_credit_releases,
+            self.progress_after_stale,
+            self.old_handle_rejected_before_reallocate,
+            self.old_handle_rejected_after_reallocate,
+            self.old_handle_import_successes,
+            self.new_handle_collisions,
+            self.driver_launches,
+            self.service_launches,
+            self.host_hot_path_control_messages,
+            self.host_hot_path_task_messages,
+            self.host_hot_path_completion_messages,
+            self.host_hot_path_payload_bytes,
+            self.host_bounce_bytes,
+        )
+        if min(counters) < 0:
+            raise ContractError("T08 counters must be non-negative")
+        if len(self.driver_binary_sha256) != 64 or len(self.service_binary_sha256) != 64:
+            raise ContractError("T08 kernel hashes must be SHA-256 digests")
+
+    @staticmethod
+    def _report_errors_are_zero(report: T08DeviceLoopReport) -> bool:
+        return (
+            all(
+                value == 0
+                for value in (
+                    report.validation_errors,
+                    report.sequence_errors,
+                    report.generation_errors,
+                    report.checksum_errors,
+                    report.marker_errors,
+                    report.timeouts,
+                    report.old_completion_credit_releases,
+                    report.reserved,
+                )
+            )
+            and report.elapsed_cycles > 0
+        )
+
+    @classmethod
+    def _baseline_report_passed(cls, report: T08DeviceLoopReport, *, driver: bool) -> bool:
+        return all(
+            (
+                cls._report_errors_are_zero(report),
+                report.processed == T08_BASELINE_SEQUENCE_COUNT,
+                report.submissions == T08_BASELINE_SEQUENCE_COUNT,
+                report.completions == T08_BASELINE_SEQUENCE_COUNT,
+                report.stale_descriptor_injections == 0,
+                report.stale_descriptor_rejections == 0,
+                report.stale_completion_injections == 0,
+                report.stale_completion_rejections == 0,
+                report.current_slot_preserved == 0,
+                report.credits_acquired == (T08_BASELINE_SEQUENCE_COUNT if driver else 0),
+                report.credits_returned == (T08_BASELINE_SEQUENCE_COUNT if driver else 0),
+                report.terminal_tasks == T08_BASELINE_SEQUENCE_COUNT,
+                report.progress_after_stale == 0,
+                report.input_fences == (T08_BASELINE_SEQUENCE_COUNT if driver else 0),
+                report.output_fences == (0 if driver else T08_BASELINE_SEQUENCE_COUNT),
+                report.mode == 0,
+            )
+        )
+
+    @classmethod
+    def _next_report_passed(cls, report: T08DeviceLoopReport, *, driver: bool) -> bool:
+        return all(
+            (
+                cls._report_errors_are_zero(report),
+                report.processed == T08_NEXT_SEQUENCE_COUNT,
+                report.submissions == T08_NEXT_SEQUENCE_COUNT,
+                report.completions == T08_NEXT_SEQUENCE_COUNT,
+                report.stale_descriptor_injections == (1 if driver else 0),
+                report.stale_descriptor_rejections == (0 if driver else 1),
+                report.stale_completion_injections == (0 if driver else 1),
+                report.stale_completion_rejections == (1 if driver else 0),
+                report.current_slot_preserved == 1,
+                report.credits_acquired == (T08_NEXT_SEQUENCE_COUNT if driver else 0),
+                report.credits_returned == (T08_NEXT_SEQUENCE_COUNT if driver else 0),
+                report.terminal_tasks == T08_NEXT_SEQUENCE_COUNT,
+                report.progress_after_stale == T08_NEXT_SEQUENCE_COUNT,
+                report.input_fences == (T08_NEXT_SEQUENCE_COUNT if driver else 0),
+                report.output_fences == (0 if driver else T08_NEXT_SEQUENCE_COUNT),
+                report.mode == 1,
+            )
+        )
+
+    @property
+    def passed(self) -> bool:
+        self.validate()
+        expected_sequences = T08_BASELINE_SEQUENCE_COUNT + T08_NEXT_SEQUENCE_COUNT
+        return all(
+            (
+                self.device_submissions == expected_sequences,
+                self.device_completions == expected_sequences,
+                self.validated_sequences == expected_sequences,
+                self.stale_descriptor_injections == 1,
+                self.stale_descriptor_rejections == 1,
+                self.stale_completion_injections == 1,
+                self.stale_completion_rejections == 1,
+                self.old_completion_credit_releases == 0,
+                self.current_slot_preserved,
+                self.progress_after_stale == T08_NEXT_SEQUENCE_COUNT,
+                self.old_handle_rejected_before_reallocate == 2,
+                self.old_handle_rejected_after_reallocate == 2,
+                self.old_handle_import_successes == 0,
+                self.new_handle_collisions == 0,
+                self.handle_probe_api == T08_HANDLE_PROBE_API,
+                self.backend == STAGE1A_BACKEND,
+                self.transport_scope is TransportScope.HOST_LOCAL,
+                self.handle_kind == STAGE1A_HANDLE_KIND,
+                self.driver_kernel == T08_DRIVER_KERNEL,
+                self.service_kernel == T08_SERVICE_KERNEL,
+                self.driver_context == T08_DEVICE_CONTEXT,
+                self.service_context == T08_DEVICE_CONTEXT,
+                self.driver_launches == 2,
+                self.service_launches == 2,
+                self.input_fence == T08_INPUT_FENCE,
+                self.output_fence == T08_OUTPUT_FENCE,
+                self.host_hot_path_control_messages == 0,
+                self.host_hot_path_task_messages == 0,
+                self.host_hot_path_completion_messages == 0,
+                self.host_hot_path_payload_bytes == 0,
+                self.host_bounce_bytes == 0,
+                not self.fallback_used,
+                self._baseline_report_passed(self.baseline_driver_report, driver=True),
+                self._baseline_report_passed(self.baseline_service_report, driver=False),
+                self._next_report_passed(self.next_driver_report, driver=True),
+                self._next_report_passed(self.next_service_report, driver=False),
+            )
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        self.validate()
+        result = asdict(self)
+        result["transport_scope"] = self.transport_scope.value
+        result["passed"] = self.passed
+        return result
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> T08Observation:
+        data = dict(value)
+        data.pop("passed", None)
+        try:
+            data["transport_scope"] = TransportScope(data["transport_scope"])
+            for name in (
+                "baseline_driver_report",
+                "baseline_service_report",
+                "next_driver_report",
+                "next_service_report",
+            ):
+                data[name] = T08DeviceLoopReport(**data[name])
+            observation = cls(**data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ContractError(f"invalid T08 observation: {exc}") from exc
         observation.validate()
         return observation
