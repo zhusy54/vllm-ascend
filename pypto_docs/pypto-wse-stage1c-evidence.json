@@ -1,0 +1,3660 @@
+{
+  "collected_at": "2026-09-08T11:21:25.155608+00:00",
+  "conclusion": {
+    "c2_status": "ESTABLISHED_HOST_LOCAL_NPU_SURROGATE",
+    "capability_level": "C2",
+    "claim_scope": "HOST_LOCAL_NPU_SURROGATE_ONLY",
+    "evidence_status": "SIMULATION",
+    "npu_wse_capability_level": "NOT_ESTABLISHED",
+    "t01_t12": "PASS",
+    "t09": "PASS",
+    "t10": "PASS",
+    "t11": "PASS",
+    "t12": "PASS"
+  },
+  "implementation_revision": "e59b9a00",
+  "prior_evidence": [
+    {
+      "case_id": "T01_T03",
+      "conclusion": {
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "evidence_status": "SIMULATION",
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "t01": "PASS",
+        "t02": "PASS",
+        "t03": "PASS"
+      },
+      "file": {
+        "bytes": 64191,
+        "path": "pypto_docs/pypto-wse-stage1a-evidence.json",
+        "sha256": "f050261d771f4dc9a00c7452f8adc33c3f2fd126ba1b9c031e32edcfc32a81d1"
+      }
+    },
+    {
+      "case_id": "T04",
+      "conclusion": {
+        "c2_status": "NOT_ESTABLISHED",
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "evidence_status": "SIMULATION",
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "t04": "PASS",
+        "t05_t12": "NOT_RUN"
+      },
+      "file": {
+        "bytes": 20512,
+        "path": "pypto_docs/pypto-wse-stage1b-evidence.json",
+        "sha256": "3361bb150528fea3e14feb5709f4059a348ad572f71ae4727abf7428c174d13b"
+      }
+    },
+    {
+      "case_id": "T05",
+      "conclusion": {
+        "c2_status": "NOT_ESTABLISHED",
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "evidence_status": "SIMULATION",
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "t05": "PASS",
+        "t06_t12": "NOT_RUN",
+        "validated_case": "T05"
+      },
+      "file": {
+        "bytes": 23407,
+        "path": "pypto_docs/pypto-wse-stage1b-t05-evidence.json",
+        "sha256": "b9d6ec64a5554511a38e4f9977e3a16b5678af21f6ccff578269787e0a6e803b"
+      }
+    },
+    {
+      "case_id": "T06",
+      "conclusion": {
+        "c2_status": "NOT_ESTABLISHED",
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "evidence_status": "SIMULATION",
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "t06": "PASS",
+        "t07_t12": "NOT_RUN",
+        "validated_case": "T06"
+      },
+      "file": {
+        "bytes": 26168,
+        "path": "pypto_docs/pypto-wse-stage1b-t06-evidence.json",
+        "sha256": "e5542e82eedb83c005142d8397bc9221cc08f3d09d8ce3f4cab2b9adc32454fe"
+      }
+    },
+    {
+      "case_id": "T07",
+      "conclusion": {
+        "c2_status": "NOT_ESTABLISHED",
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "evidence_status": "SIMULATION",
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "t07": "PASS",
+        "t08_t12": "NOT_RUN",
+        "validated_case": "T07"
+      },
+      "file": {
+        "bytes": 27335,
+        "path": "pypto_docs/pypto-wse-stage1b-t07-evidence.json",
+        "sha256": "7d6f54756400bf4dc9a588e41f6c76eec1020d6628d299cc3e54437fd4524e5e"
+      }
+    },
+    {
+      "case_id": "T08",
+      "conclusion": {
+        "c2_status": "NOT_ESTABLISHED",
+        "capability_level": "C1",
+        "claim_scope": "NPU_SURROGATE_ONLY",
+        "evidence_status": "SIMULATION",
+        "npu_wse_capability_level": "NOT_ESTABLISHED",
+        "t08": "PASS",
+        "t09_t12": "NOT_RUN",
+        "validated_case": "T08"
+      },
+      "file": {
+        "bytes": 48284,
+        "path": "pypto_docs/pypto-wse-stage1b-t08-evidence.json",
+        "sha256": "3b4f5af5233883f853989deed570c64411c271a10fa7d47fc4824ed5c1441145"
+      }
+    }
+  ],
+  "profile": "NPU_SURROGATE",
+  "schema_version": 1,
+  "successful_runs": {
+    "T09": [
+      {
+        "endpoints": {
+          "ATTENTION": {
+            "case_id": "T09",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 1163,
+              "received_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              },
+              "sent_bytes": 1139,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              }
+            },
+            "device_id": 0,
+            "device_loop": {
+              "binary_sha256": "5b683d3d9c7c9eb8f2c9819814e769bccf92190be9f623a470c360e45c3304af",
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1c_t09_driver_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "checksum_errors": 0,
+                "completions": 10100,
+                "credits_acquired": 10100,
+                "credits_returned": 10100,
+                "elapsed_cycles": 14878885408,
+                "generation_errors": 0,
+                "input_fences": 10100,
+                "marker_errors": 0,
+                "max_inflight": 2,
+                "measured_processed": 10000,
+                "output_fences": 0,
+                "payload_1m_count": 100,
+                "payload_4k_count": 4000,
+                "payload_64_count": 4000,
+                "payload_64k_count": 1900,
+                "payload_words_validated": 30803200,
+                "processed": 10100,
+                "progress_checkpoints": 100,
+                "progress_interval": 100,
+                "queue_stalls": 0,
+                "reserved0": 0,
+                "reserved1": 0,
+                "reserved2": 0,
+                "reserved3": 0,
+                "sequence_errors": 0,
+                "slot0_processed": 5050,
+                "slot1_processed": 5050,
+                "submissions": 10100,
+                "terminal_tasks": 10100,
+                "timeouts": 0,
+                "validation_errors": 0,
+                "warmup_processed": 100
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": {
+              "close_order": [],
+              "duplicate_close_attempts": 0,
+              "duplicate_close_rejections": 0,
+              "idempotent_close_successes": 0
+            },
+            "manifest": {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 0,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 2097664,
+              "mapping_bytes": 4194304,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "6da6d78e74e17aebfef4b968b476bf22745be3d21b225d32b01af6e558266170"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            "metrics": {
+              "host_cpu_ns": 1362814515,
+              "host_cpu_utilization_pct": 9.159477563134914,
+              "host_memory_growth_bytes": 208896,
+              "host_wall_ns": 14878736321,
+              "initial_rss_bytes": 24428544,
+              "kernel_elapsed_ns": 14879667859,
+              "post_kernel_rss_bytes": 141651968,
+              "process_residual_growth_bytes": 76513280,
+              "runtime_setup_growth_bytes": 117014528,
+              "steady_state_rss_bytes": 141443072
+            },
+            "old_peer_handle_probe": null,
+            "role": "ATTENTION",
+            "success": true
+          },
+          "WSE_SURROGATE": {
+            "case_id": "T09",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 1139,
+              "received_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              },
+              "sent_bytes": 1163,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              }
+            },
+            "device_id": 1,
+            "device_loop": {
+              "binary_sha256": "f6c28bf3f46a261cdeee5223a19133aade10fbc4a93f04755f0b391fa6bc93d9",
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1c_t09_service_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "checksum_errors": 0,
+                "completions": 10100,
+                "credits_acquired": 0,
+                "credits_returned": 0,
+                "elapsed_cycles": 14865541637,
+                "generation_errors": 0,
+                "input_fences": 0,
+                "marker_errors": 0,
+                "max_inflight": 2,
+                "measured_processed": 10000,
+                "output_fences": 10100,
+                "payload_1m_count": 100,
+                "payload_4k_count": 4000,
+                "payload_64_count": 4000,
+                "payload_64k_count": 1900,
+                "payload_words_validated": 30803200,
+                "processed": 10100,
+                "progress_checkpoints": 100,
+                "progress_interval": 100,
+                "queue_stalls": 0,
+                "reserved0": 0,
+                "reserved1": 0,
+                "reserved2": 0,
+                "reserved3": 0,
+                "sequence_errors": 0,
+                "slot0_processed": 5050,
+                "slot1_processed": 5050,
+                "submissions": 10100,
+                "terminal_tasks": 10100,
+                "timeouts": 0,
+                "validation_errors": 0,
+                "warmup_processed": 100
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": {
+              "close_order": [],
+              "duplicate_close_attempts": 0,
+              "duplicate_close_rejections": 0,
+              "idempotent_close_successes": 0
+            },
+            "manifest": {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 1,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 2097664,
+              "mapping_bytes": 4194304,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "c9b784cee61363bf5c8e2469d8aac1501e6085cea88d1e8c715b102c1bbbd959"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            "metrics": {
+              "host_cpu_ns": 1330789120,
+              "host_cpu_utilization_pct": 8.951909222858534,
+              "host_memory_growth_bytes": 208896,
+              "host_wall_ns": 14865980953,
+              "initial_rss_bytes": 24293376,
+              "kernel_elapsed_ns": 14866487865,
+              "post_kernel_rss_bytes": 141520896,
+              "process_residual_growth_bytes": 76513280,
+              "runtime_setup_growth_bytes": 117018624,
+              "steady_state_rss_bytes": 141312000
+            },
+            "old_peer_handle_probe": null,
+            "role": "WSE_SURROGATE",
+            "success": true
+          }
+        },
+        "observation": {
+          "backend": "cann_acl_vmm_p2p",
+          "case_id": "T09",
+          "device_completions": 10100,
+          "device_memory_growth_bytes": 0,
+          "device_submissions": 10100,
+          "driver_binary_sha256": "5b683d3d9c7c9eb8f2c9819814e769bccf92190be9f623a470c360e45c3304af",
+          "driver_report": {
+            "checksum_errors": 0,
+            "completions": 10100,
+            "credits_acquired": 10100,
+            "credits_returned": 10100,
+            "elapsed_cycles": 14878885408,
+            "generation_errors": 0,
+            "input_fences": 10100,
+            "marker_errors": 0,
+            "max_inflight": 2,
+            "measured_processed": 10000,
+            "output_fences": 0,
+            "payload_1m_count": 100,
+            "payload_4k_count": 4000,
+            "payload_64_count": 4000,
+            "payload_64k_count": 1900,
+            "payload_words_validated": 30803200,
+            "processed": 10100,
+            "progress_checkpoints": 100,
+            "progress_interval": 100,
+            "queue_stalls": 0,
+            "reserved0": 0,
+            "reserved1": 0,
+            "reserved2": 0,
+            "reserved3": 0,
+            "sequence_errors": 0,
+            "slot0_processed": 5050,
+            "slot1_processed": 5050,
+            "submissions": 10100,
+            "terminal_tasks": 10100,
+            "timeouts": 0,
+            "validation_errors": 0,
+            "warmup_processed": 100
+          },
+          "fallback_used": false,
+          "generation": 1,
+          "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+          "host_bounce_bytes": 0,
+          "host_cpu_utilization_pct": 9.159477563134914,
+          "host_hot_path_messages": 0,
+          "host_hot_path_payload_bytes": 0,
+          "host_memory_growth_bytes": 208896,
+          "host_memory_growth_limit_bytes": 67108864,
+          "max_inflight": 2,
+          "measured_count": 10000,
+          "passed": true,
+          "payload_bytes": [
+            64,
+            4096,
+            65536,
+            1048576
+          ],
+          "progress_checkpoints": 100,
+          "progress_interval": 100,
+          "queue_stalls": 0,
+          "registration_growth": 0,
+          "service_binary_sha256": "f6c28bf3f46a261cdeee5223a19133aade10fbc4a93f04755f0b391fa6bc93d9",
+          "service_report": {
+            "checksum_errors": 0,
+            "completions": 10100,
+            "credits_acquired": 0,
+            "credits_returned": 0,
+            "elapsed_cycles": 14865541637,
+            "generation_errors": 0,
+            "input_fences": 0,
+            "marker_errors": 0,
+            "max_inflight": 2,
+            "measured_processed": 10000,
+            "output_fences": 10100,
+            "payload_1m_count": 100,
+            "payload_4k_count": 4000,
+            "payload_64_count": 4000,
+            "payload_64k_count": 1900,
+            "payload_words_validated": 30803200,
+            "processed": 10100,
+            "progress_checkpoints": 100,
+            "progress_interval": 100,
+            "queue_stalls": 0,
+            "reserved0": 0,
+            "reserved1": 0,
+            "reserved2": 0,
+            "reserved3": 0,
+            "sequence_errors": 0,
+            "slot0_processed": 5050,
+            "slot1_processed": 5050,
+            "submissions": 10100,
+            "terminal_tasks": 10100,
+            "timeouts": 0,
+            "validation_errors": 0,
+            "warmup_processed": 100
+          },
+          "slot_count": 2,
+          "transport_scope": "HOST_LOCAL",
+          "validated_sequences": 10100,
+          "warmup_count": 100
+        },
+        "result": {
+          "actual_backend": "cann_acl_vmm_p2p",
+          "c2_status": "NOT_ESTABLISHED",
+          "capability_level": "C1",
+          "claim_scope": "NPU_SURROGATE_ONLY",
+          "completed_at": "2026-09-08T11:13:11.000440+00:00",
+          "data_results": {
+            "T09": {
+              "attempts": 10100,
+              "passed": 10100,
+              "status": "PASS"
+            }
+          },
+          "devices": {
+            "ATTENTION": 0,
+            "WSE_SURROGATE": 1
+          },
+          "endpoints": {
+            "ATTENTION": {
+              "artifact": "attention_stage1c.json",
+              "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 11045,
+                    "path": "run/device-0/device-809478_20260908191252183.log",
+                    "sha256": "99f56fbe54486939d9b0d5f5c7706c2069084c2940badd77baba3024fc52e62b"
+                  },
+                  {
+                    "bytes": 36884,
+                    "path": "run/plog/plog-809478_20260908191247620.log",
+                    "sha256": "0d4cde0cc1cec34b30e0ae79a88eda362121a6f145179fccf49ca1ca402360a7"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "host_log": {
+                "bytes": 0,
+                "path": "attention_stage1c.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "pid": 809478,
+              "success": true
+            },
+            "WSE_SURROGATE": {
+              "artifact": "wse_surrogate_stage1c.json",
+              "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 11046,
+                    "path": "run/device-1/device-809500_20260908191251933.log",
+                    "sha256": "950f92ff28a13156cc907181e7e093015ac309038f4d1dcadd692d4514329b2e"
+                  },
+                  {
+                    "bytes": 36884,
+                    "path": "run/plog/plog-809500_20260908191247871.log",
+                    "sha256": "d282826b1c21c1130156f5f8b3c878bffe821b520071f4a31568732eca57042f"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "host_log": {
+                "bytes": 0,
+                "path": "wse_surrogate_stage1c.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "pid": 809500,
+              "success": true
+            }
+          },
+          "evidence_status": "SIMULATION",
+          "fallback_used": false,
+          "generation": 1,
+          "host_bounce_bytes": 0,
+          "npu_wse_capability_level": "NOT_ESTABLISHED",
+          "observation": {
+            "backend": "cann_acl_vmm_p2p",
+            "case_id": "T09",
+            "device_completions": 10100,
+            "device_memory_growth_bytes": 0,
+            "device_submissions": 10100,
+            "driver_binary_sha256": "5b683d3d9c7c9eb8f2c9819814e769bccf92190be9f623a470c360e45c3304af",
+            "driver_report": {
+              "checksum_errors": 0,
+              "completions": 10100,
+              "credits_acquired": 10100,
+              "credits_returned": 10100,
+              "elapsed_cycles": 14878885408,
+              "generation_errors": 0,
+              "input_fences": 10100,
+              "marker_errors": 0,
+              "max_inflight": 2,
+              "measured_processed": 10000,
+              "output_fences": 0,
+              "payload_1m_count": 100,
+              "payload_4k_count": 4000,
+              "payload_64_count": 4000,
+              "payload_64k_count": 1900,
+              "payload_words_validated": 30803200,
+              "processed": 10100,
+              "progress_checkpoints": 100,
+              "progress_interval": 100,
+              "queue_stalls": 0,
+              "reserved0": 0,
+              "reserved1": 0,
+              "reserved2": 0,
+              "reserved3": 0,
+              "sequence_errors": 0,
+              "slot0_processed": 5050,
+              "slot1_processed": 5050,
+              "submissions": 10100,
+              "terminal_tasks": 10100,
+              "timeouts": 0,
+              "validation_errors": 0,
+              "warmup_processed": 100
+            },
+            "fallback_used": false,
+            "generation": 1,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "host_bounce_bytes": 0,
+            "host_cpu_utilization_pct": 9.159477563134914,
+            "host_hot_path_messages": 0,
+            "host_hot_path_payload_bytes": 0,
+            "host_memory_growth_bytes": 208896,
+            "host_memory_growth_limit_bytes": 67108864,
+            "max_inflight": 2,
+            "measured_count": 10000,
+            "passed": true,
+            "payload_bytes": [
+              64,
+              4096,
+              65536,
+              1048576
+            ],
+            "progress_checkpoints": 100,
+            "progress_interval": 100,
+            "queue_stalls": 0,
+            "registration_growth": 0,
+            "service_binary_sha256": "f6c28bf3f46a261cdeee5223a19133aade10fbc4a93f04755f0b391fa6bc93d9",
+            "service_report": {
+              "checksum_errors": 0,
+              "completions": 10100,
+              "credits_acquired": 0,
+              "credits_returned": 0,
+              "elapsed_cycles": 14865541637,
+              "generation_errors": 0,
+              "input_fences": 0,
+              "marker_errors": 0,
+              "max_inflight": 2,
+              "measured_processed": 10000,
+              "output_fences": 10100,
+              "payload_1m_count": 100,
+              "payload_4k_count": 4000,
+              "payload_64_count": 4000,
+              "payload_64k_count": 1900,
+              "payload_words_validated": 30803200,
+              "processed": 10100,
+              "progress_checkpoints": 100,
+              "progress_interval": 100,
+              "queue_stalls": 0,
+              "reserved0": 0,
+              "reserved1": 0,
+              "reserved2": 0,
+              "reserved3": 0,
+              "sequence_errors": 0,
+              "slot0_processed": 5050,
+              "slot1_processed": 5050,
+              "submissions": 10100,
+              "terminal_tasks": 10100,
+              "timeouts": 0,
+              "validation_errors": 0,
+              "warmup_processed": 100
+            },
+            "slot_count": 2,
+            "transport_scope": "HOST_LOCAL",
+            "validated_sequences": 10100,
+            "warmup_count": 100
+          },
+          "profile": "NPU_SURROGATE",
+          "resource_cleanup": "VERIFIED",
+          "run_id": "stage1c-aa5c3e4104d54cb5b21d9c5aa442b128",
+          "schema_version": 1,
+          "stage1c_progress": "T09_PASS",
+          "start_order": "attention-first",
+          "success": true,
+          "transport_scope": "HOST_LOCAL"
+        },
+        "task_id": "task_20260908_191247_80932828907"
+      },
+      {
+        "endpoints": {
+          "ATTENTION": {
+            "case_id": "T09",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 1163,
+              "received_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              },
+              "sent_bytes": 1139,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              }
+            },
+            "device_id": 0,
+            "device_loop": {
+              "binary_sha256": "5b683d3d9c7c9eb8f2c9819814e769bccf92190be9f623a470c360e45c3304af",
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1c_t09_driver_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "checksum_errors": 0,
+                "completions": 10100,
+                "credits_acquired": 10100,
+                "credits_returned": 10100,
+                "elapsed_cycles": 14914760577,
+                "generation_errors": 0,
+                "input_fences": 10100,
+                "marker_errors": 0,
+                "max_inflight": 2,
+                "measured_processed": 10000,
+                "output_fences": 0,
+                "payload_1m_count": 100,
+                "payload_4k_count": 4000,
+                "payload_64_count": 4000,
+                "payload_64k_count": 1900,
+                "payload_words_validated": 30803200,
+                "processed": 10100,
+                "progress_checkpoints": 100,
+                "progress_interval": 100,
+                "queue_stalls": 0,
+                "reserved0": 0,
+                "reserved1": 0,
+                "reserved2": 0,
+                "reserved3": 0,
+                "sequence_errors": 0,
+                "slot0_processed": 5050,
+                "slot1_processed": 5050,
+                "submissions": 10100,
+                "terminal_tasks": 10100,
+                "timeouts": 0,
+                "validation_errors": 0,
+                "warmup_processed": 100
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": {
+              "close_order": [],
+              "duplicate_close_attempts": 0,
+              "duplicate_close_rejections": 0,
+              "idempotent_close_successes": 0
+            },
+            "manifest": {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 0,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 2097664,
+              "mapping_bytes": 4194304,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "d793c1d213bab1c85f41a2cb84e1548aa1fd7bd9fddeea3357bb96a99e674913"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            "metrics": {
+              "host_cpu_ns": 1396452740,
+              "host_cpu_utilization_pct": 9.363126750139125,
+              "host_memory_growth_bytes": 208896,
+              "host_wall_ns": 14914384663,
+              "initial_rss_bytes": 24240128,
+              "kernel_elapsed_ns": 14915525035,
+              "post_kernel_rss_bytes": 141414400,
+              "process_residual_growth_bytes": 76460032,
+              "runtime_setup_growth_bytes": 116965376,
+              "steady_state_rss_bytes": 141205504
+            },
+            "old_peer_handle_probe": null,
+            "role": "ATTENTION",
+            "success": true
+          },
+          "WSE_SURROGATE": {
+            "case_id": "T09",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 1139,
+              "received_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              },
+              "sent_bytes": 1163,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              }
+            },
+            "device_id": 1,
+            "device_loop": {
+              "binary_sha256": "f6c28bf3f46a261cdeee5223a19133aade10fbc4a93f04755f0b391fa6bc93d9",
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1c_t09_service_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "checksum_errors": 0,
+                "completions": 10100,
+                "credits_acquired": 0,
+                "credits_returned": 0,
+                "elapsed_cycles": 14901145900,
+                "generation_errors": 0,
+                "input_fences": 0,
+                "marker_errors": 0,
+                "max_inflight": 2,
+                "measured_processed": 10000,
+                "output_fences": 10100,
+                "payload_1m_count": 100,
+                "payload_4k_count": 4000,
+                "payload_64_count": 4000,
+                "payload_64k_count": 1900,
+                "payload_words_validated": 30803200,
+                "processed": 10100,
+                "progress_checkpoints": 100,
+                "progress_interval": 100,
+                "queue_stalls": 0,
+                "reserved0": 0,
+                "reserved1": 0,
+                "reserved2": 0,
+                "reserved3": 0,
+                "sequence_errors": 0,
+                "slot0_processed": 5050,
+                "slot1_processed": 5050,
+                "submissions": 10100,
+                "terminal_tasks": 10100,
+                "timeouts": 0,
+                "validation_errors": 0,
+                "warmup_processed": 100
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": {
+              "close_order": [],
+              "duplicate_close_attempts": 0,
+              "duplicate_close_rejections": 0,
+              "idempotent_close_successes": 0
+            },
+            "manifest": {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 1,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 2097664,
+              "mapping_bytes": 4194304,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "ca7c82c70c46a1d428e8cb3a2ec9413b11d95404a0b626f610ff1a70f8957ee7"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            "metrics": {
+              "host_cpu_ns": 1343086375,
+              "host_cpu_utilization_pct": 9.01307400380745,
+              "host_memory_growth_bytes": 208896,
+              "host_wall_ns": 14901534975,
+              "initial_rss_bytes": 24395776,
+              "kernel_elapsed_ns": 14902038521,
+              "post_kernel_rss_bytes": 141619200,
+              "process_residual_growth_bytes": 76509184,
+              "runtime_setup_growth_bytes": 117014528,
+              "steady_state_rss_bytes": 141410304
+            },
+            "old_peer_handle_probe": null,
+            "role": "WSE_SURROGATE",
+            "success": true
+          }
+        },
+        "observation": {
+          "backend": "cann_acl_vmm_p2p",
+          "case_id": "T09",
+          "device_completions": 10100,
+          "device_memory_growth_bytes": 0,
+          "device_submissions": 10100,
+          "driver_binary_sha256": "5b683d3d9c7c9eb8f2c9819814e769bccf92190be9f623a470c360e45c3304af",
+          "driver_report": {
+            "checksum_errors": 0,
+            "completions": 10100,
+            "credits_acquired": 10100,
+            "credits_returned": 10100,
+            "elapsed_cycles": 14914760577,
+            "generation_errors": 0,
+            "input_fences": 10100,
+            "marker_errors": 0,
+            "max_inflight": 2,
+            "measured_processed": 10000,
+            "output_fences": 0,
+            "payload_1m_count": 100,
+            "payload_4k_count": 4000,
+            "payload_64_count": 4000,
+            "payload_64k_count": 1900,
+            "payload_words_validated": 30803200,
+            "processed": 10100,
+            "progress_checkpoints": 100,
+            "progress_interval": 100,
+            "queue_stalls": 0,
+            "reserved0": 0,
+            "reserved1": 0,
+            "reserved2": 0,
+            "reserved3": 0,
+            "sequence_errors": 0,
+            "slot0_processed": 5050,
+            "slot1_processed": 5050,
+            "submissions": 10100,
+            "terminal_tasks": 10100,
+            "timeouts": 0,
+            "validation_errors": 0,
+            "warmup_processed": 100
+          },
+          "fallback_used": false,
+          "generation": 1,
+          "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+          "host_bounce_bytes": 0,
+          "host_cpu_utilization_pct": 9.363126750139125,
+          "host_hot_path_messages": 0,
+          "host_hot_path_payload_bytes": 0,
+          "host_memory_growth_bytes": 208896,
+          "host_memory_growth_limit_bytes": 67108864,
+          "max_inflight": 2,
+          "measured_count": 10000,
+          "passed": true,
+          "payload_bytes": [
+            64,
+            4096,
+            65536,
+            1048576
+          ],
+          "progress_checkpoints": 100,
+          "progress_interval": 100,
+          "queue_stalls": 0,
+          "registration_growth": 0,
+          "service_binary_sha256": "f6c28bf3f46a261cdeee5223a19133aade10fbc4a93f04755f0b391fa6bc93d9",
+          "service_report": {
+            "checksum_errors": 0,
+            "completions": 10100,
+            "credits_acquired": 0,
+            "credits_returned": 0,
+            "elapsed_cycles": 14901145900,
+            "generation_errors": 0,
+            "input_fences": 0,
+            "marker_errors": 0,
+            "max_inflight": 2,
+            "measured_processed": 10000,
+            "output_fences": 10100,
+            "payload_1m_count": 100,
+            "payload_4k_count": 4000,
+            "payload_64_count": 4000,
+            "payload_64k_count": 1900,
+            "payload_words_validated": 30803200,
+            "processed": 10100,
+            "progress_checkpoints": 100,
+            "progress_interval": 100,
+            "queue_stalls": 0,
+            "reserved0": 0,
+            "reserved1": 0,
+            "reserved2": 0,
+            "reserved3": 0,
+            "sequence_errors": 0,
+            "slot0_processed": 5050,
+            "slot1_processed": 5050,
+            "submissions": 10100,
+            "terminal_tasks": 10100,
+            "timeouts": 0,
+            "validation_errors": 0,
+            "warmup_processed": 100
+          },
+          "slot_count": 2,
+          "transport_scope": "HOST_LOCAL",
+          "validated_sequences": 10100,
+          "warmup_count": 100
+        },
+        "result": {
+          "actual_backend": "cann_acl_vmm_p2p",
+          "c2_status": "NOT_ESTABLISHED",
+          "capability_level": "C1",
+          "claim_scope": "NPU_SURROGATE_ONLY",
+          "completed_at": "2026-09-08T11:13:51.234280+00:00",
+          "data_results": {
+            "T09": {
+              "attempts": 10100,
+              "passed": 10100,
+              "status": "PASS"
+            }
+          },
+          "devices": {
+            "ATTENTION": 0,
+            "WSE_SURROGATE": 1
+          },
+          "endpoints": {
+            "ATTENTION": {
+              "artifact": "attention_stage1c.json",
+              "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 11045,
+                    "path": "run/device-0/device-811946_20260908191333324.log",
+                    "sha256": "25e73098840a44b8a8bf405b9e6ffac1ff4f759d003d8c2ffe072147cefd4414"
+                  },
+                  {
+                    "bytes": 36884,
+                    "path": "run/plog/plog-811946_20260908191328956.log",
+                    "sha256": "e0d1c74fe0673aeb86624db586fb9e6584867c6dc77dc49a2b8175b6d02abcea"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "host_log": {
+                "bytes": 0,
+                "path": "attention_stage1c.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "pid": 811946,
+              "success": true
+            },
+            "WSE_SURROGATE": {
+              "artifact": "wse_surrogate_stage1c.json",
+              "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 11046,
+                    "path": "run/device-1/device-811927_20260908191333016.log",
+                    "sha256": "bf008eb6a940150d0581d68379750a0130859f4710476621eaa3e9532ba4a7b3"
+                  },
+                  {
+                    "bytes": 36884,
+                    "path": "run/plog/plog-811927_20260908191328704.log",
+                    "sha256": "4f7f4036207d395c8a2ba69fea22c948e3e1b206a6fe194b17b535a5e596c7e6"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "host_log": {
+                "bytes": 0,
+                "path": "wse_surrogate_stage1c.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "pid": 811927,
+              "success": true
+            }
+          },
+          "evidence_status": "SIMULATION",
+          "fallback_used": false,
+          "generation": 1,
+          "host_bounce_bytes": 0,
+          "npu_wse_capability_level": "NOT_ESTABLISHED",
+          "observation": {
+            "backend": "cann_acl_vmm_p2p",
+            "case_id": "T09",
+            "device_completions": 10100,
+            "device_memory_growth_bytes": 0,
+            "device_submissions": 10100,
+            "driver_binary_sha256": "5b683d3d9c7c9eb8f2c9819814e769bccf92190be9f623a470c360e45c3304af",
+            "driver_report": {
+              "checksum_errors": 0,
+              "completions": 10100,
+              "credits_acquired": 10100,
+              "credits_returned": 10100,
+              "elapsed_cycles": 14914760577,
+              "generation_errors": 0,
+              "input_fences": 10100,
+              "marker_errors": 0,
+              "max_inflight": 2,
+              "measured_processed": 10000,
+              "output_fences": 0,
+              "payload_1m_count": 100,
+              "payload_4k_count": 4000,
+              "payload_64_count": 4000,
+              "payload_64k_count": 1900,
+              "payload_words_validated": 30803200,
+              "processed": 10100,
+              "progress_checkpoints": 100,
+              "progress_interval": 100,
+              "queue_stalls": 0,
+              "reserved0": 0,
+              "reserved1": 0,
+              "reserved2": 0,
+              "reserved3": 0,
+              "sequence_errors": 0,
+              "slot0_processed": 5050,
+              "slot1_processed": 5050,
+              "submissions": 10100,
+              "terminal_tasks": 10100,
+              "timeouts": 0,
+              "validation_errors": 0,
+              "warmup_processed": 100
+            },
+            "fallback_used": false,
+            "generation": 1,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "host_bounce_bytes": 0,
+            "host_cpu_utilization_pct": 9.363126750139125,
+            "host_hot_path_messages": 0,
+            "host_hot_path_payload_bytes": 0,
+            "host_memory_growth_bytes": 208896,
+            "host_memory_growth_limit_bytes": 67108864,
+            "max_inflight": 2,
+            "measured_count": 10000,
+            "passed": true,
+            "payload_bytes": [
+              64,
+              4096,
+              65536,
+              1048576
+            ],
+            "progress_checkpoints": 100,
+            "progress_interval": 100,
+            "queue_stalls": 0,
+            "registration_growth": 0,
+            "service_binary_sha256": "f6c28bf3f46a261cdeee5223a19133aade10fbc4a93f04755f0b391fa6bc93d9",
+            "service_report": {
+              "checksum_errors": 0,
+              "completions": 10100,
+              "credits_acquired": 0,
+              "credits_returned": 0,
+              "elapsed_cycles": 14901145900,
+              "generation_errors": 0,
+              "input_fences": 0,
+              "marker_errors": 0,
+              "max_inflight": 2,
+              "measured_processed": 10000,
+              "output_fences": 10100,
+              "payload_1m_count": 100,
+              "payload_4k_count": 4000,
+              "payload_64_count": 4000,
+              "payload_64k_count": 1900,
+              "payload_words_validated": 30803200,
+              "processed": 10100,
+              "progress_checkpoints": 100,
+              "progress_interval": 100,
+              "queue_stalls": 0,
+              "reserved0": 0,
+              "reserved1": 0,
+              "reserved2": 0,
+              "reserved3": 0,
+              "sequence_errors": 0,
+              "slot0_processed": 5050,
+              "slot1_processed": 5050,
+              "submissions": 10100,
+              "terminal_tasks": 10100,
+              "timeouts": 0,
+              "validation_errors": 0,
+              "warmup_processed": 100
+            },
+            "slot_count": 2,
+            "transport_scope": "HOST_LOCAL",
+            "validated_sequences": 10100,
+            "warmup_count": 100
+          },
+          "profile": "NPU_SURROGATE",
+          "resource_cleanup": "VERIFIED",
+          "run_id": "stage1c-98c5ee656d0a48da8f47507c336eb29c",
+          "schema_version": 1,
+          "stage1c_progress": "T09_PASS",
+          "start_order": "wse-first",
+          "success": true,
+          "transport_scope": "HOST_LOCAL"
+        },
+        "task_id": "task_20260908_191328_81178525074"
+      }
+    ],
+    "T10": [
+      {
+        "endpoints": {
+          "ATTENTION": {
+            "case_id": "T10",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 1159,
+              "received_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              },
+              "sent_bytes": 1135,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              }
+            },
+            "device_id": 0,
+            "device_loop": {
+              "binary_sha256": "ad2e7d63a2356271cd961903667b915d94866710617ee77496c727ee3cded4b0",
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1c_fault_driver_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "accepted": 1,
+                "accepting_new_requests": 0,
+                "completions": 0,
+                "configured_timeout_cycles": 500000000,
+                "credits_returned": 0,
+                "elapsed_cycles": 500000052,
+                "forged_success_completions": 0,
+                "generation_errors": 0,
+                "generation_unhealthy": 1,
+                "input_fences": 1,
+                "mode": 10,
+                "output_fences": 0,
+                "quarantined_slots": 1,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "service_pause_observed": 1,
+                "slot_reuse_after_timeout": 0,
+                "submissions": 1,
+                "successes": 0,
+                "terminal_errors": 1,
+                "timed_out": 1,
+                "timeout_within_bound": 1,
+                "timeouts": 1,
+                "validation_errors": 0
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": {
+              "close_order": [],
+              "duplicate_close_attempts": 0,
+              "duplicate_close_rejections": 0,
+              "idempotent_close_successes": 0
+            },
+            "manifest": {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 0,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1048896,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "131a38b553f767ef8b66103fe836b583beb040970f0467d7e5c95a3cd0687add"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            "metrics": {
+              "host_cpu_ns": 52631916,
+              "host_cpu_utilization_pct": 10.53779848096047,
+              "host_memory_growth_bytes": 0,
+              "host_wall_ns": 499458365,
+              "initial_rss_bytes": 24313856,
+              "kernel_elapsed_ns": 500267529,
+              "post_kernel_rss_bytes": 139624448,
+              "process_residual_growth_bytes": 74715136,
+              "runtime_setup_growth_bytes": 115310592,
+              "steady_state_rss_bytes": 139624448
+            },
+            "old_peer_handle_probe": null,
+            "role": "ATTENTION",
+            "success": true
+          },
+          "WSE_SURROGATE": {
+            "case_id": "T10",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 1135,
+              "received_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              },
+              "sent_bytes": 1159,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              }
+            },
+            "device_id": 1,
+            "device_loop": {
+              "binary_sha256": "625bbefa8084890eaf46d21acfb435b8982f7ee8633e2dfc79ed75f6367a7661",
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1c_fault_service_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "accepted": 1,
+                "accepting_new_requests": 0,
+                "completions": 0,
+                "configured_timeout_cycles": 500000000,
+                "credits_returned": 0,
+                "elapsed_cycles": 500000006,
+                "forged_success_completions": 0,
+                "generation_errors": 0,
+                "generation_unhealthy": 1,
+                "input_fences": 0,
+                "mode": 10,
+                "output_fences": 0,
+                "quarantined_slots": 1,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "service_pause_observed": 1,
+                "slot_reuse_after_timeout": 0,
+                "submissions": 1,
+                "successes": 0,
+                "terminal_errors": 1,
+                "timed_out": 1,
+                "timeout_within_bound": 1,
+                "timeouts": 1,
+                "validation_errors": 0
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": {
+              "close_order": [],
+              "duplicate_close_attempts": 0,
+              "duplicate_close_rejections": 0,
+              "idempotent_close_successes": 0
+            },
+            "manifest": {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 1,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1048896,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "b59054d6b2e8b3d5c99fb6503fc7b02c4ff509adc16bb5310e0c01b218929ea3"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            "metrics": {
+              "host_cpu_ns": 55056466,
+              "host_cpu_utilization_pct": 11.01656883651757,
+              "host_memory_growth_bytes": 0,
+              "host_wall_ns": 499760559,
+              "initial_rss_bytes": 24289280,
+              "kernel_elapsed_ns": 500221410,
+              "post_kernel_rss_bytes": 139689984,
+              "process_residual_growth_bytes": 74801152,
+              "runtime_setup_growth_bytes": 115400704,
+              "steady_state_rss_bytes": 139689984
+            },
+            "old_peer_handle_probe": null,
+            "role": "WSE_SURROGATE",
+            "success": true
+          }
+        },
+        "observation": {
+          "accepting_new_requests": false,
+          "backend": "cann_acl_vmm_p2p",
+          "case_id": "T10",
+          "configured_timeout_cycles": 500000000,
+          "driver_binary_sha256": "ad2e7d63a2356271cd961903667b915d94866710617ee77496c727ee3cded4b0",
+          "driver_report": {
+            "accepted": 1,
+            "accepting_new_requests": 0,
+            "completions": 0,
+            "configured_timeout_cycles": 500000000,
+            "credits_returned": 0,
+            "elapsed_cycles": 500000052,
+            "forged_success_completions": 0,
+            "generation_errors": 0,
+            "generation_unhealthy": 1,
+            "input_fences": 1,
+            "mode": 10,
+            "output_fences": 0,
+            "quarantined_slots": 1,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "service_pause_observed": 1,
+            "slot_reuse_after_timeout": 0,
+            "submissions": 1,
+            "successes": 0,
+            "terminal_errors": 1,
+            "timed_out": 1,
+            "timeout_within_bound": 1,
+            "timeouts": 1,
+            "validation_errors": 0
+          },
+          "fallback_used": false,
+          "forged_success_completions": 0,
+          "generation": 1,
+          "generation_unhealthy": true,
+          "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+          "host_bounce_bytes": 0,
+          "host_hot_path_messages": 0,
+          "host_hot_path_payload_bytes": 0,
+          "passed": true,
+          "quarantined_slots": 1,
+          "service_binary_sha256": "625bbefa8084890eaf46d21acfb435b8982f7ee8633e2dfc79ed75f6367a7661",
+          "service_report": {
+            "accepted": 1,
+            "accepting_new_requests": 0,
+            "completions": 0,
+            "configured_timeout_cycles": 500000000,
+            "credits_returned": 0,
+            "elapsed_cycles": 500000006,
+            "forged_success_completions": 0,
+            "generation_errors": 0,
+            "generation_unhealthy": 1,
+            "input_fences": 0,
+            "mode": 10,
+            "output_fences": 0,
+            "quarantined_slots": 1,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "service_pause_observed": 1,
+            "slot_reuse_after_timeout": 0,
+            "submissions": 1,
+            "successes": 0,
+            "terminal_errors": 1,
+            "timed_out": 1,
+            "timeout_within_bound": 1,
+            "timeouts": 1,
+            "validation_errors": 0
+          },
+          "slot_reuse_after_timeout": 0,
+          "timeout_error": "WSE_UNRESPONSIVE_TIMEOUT",
+          "transport_scope": "HOST_LOCAL"
+        },
+        "result": {
+          "actual_backend": "cann_acl_vmm_p2p",
+          "c2_status": "NOT_ESTABLISHED",
+          "capability_level": "C1",
+          "claim_scope": "NPU_SURROGATE_ONLY",
+          "completed_at": "2026-09-08T11:14:19.570760+00:00",
+          "data_results": {
+            "T10": {
+              "attempts": 1,
+              "passed": 1,
+              "status": "PASS"
+            }
+          },
+          "devices": {
+            "ATTENTION": 0,
+            "WSE_SURROGATE": 1
+          },
+          "endpoints": {
+            "ATTENTION": {
+              "artifact": "attention_stage1c.json",
+              "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 11045,
+                    "path": "run/device-0/device-819617_20260908191415404.log",
+                    "sha256": "77690ae0ef0ba02730e0bcb66f13bc76d5cd5867c620c93b2bd708b8a10ce53e"
+                  },
+                  {
+                    "bytes": 36755,
+                    "path": "run/plog/plog-819617_20260908191411260.log",
+                    "sha256": "e3acf7f7a7c3a8b68560f0749c28b19ca9b5b116bed03b85a1a6aada7a6a3b63"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "host_log": {
+                "bytes": 0,
+                "path": "attention_stage1c.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "pid": 819617,
+              "success": true
+            },
+            "WSE_SURROGATE": {
+              "artifact": "wse_surrogate_stage1c.json",
+              "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 11046,
+                    "path": "run/device-1/device-819645_20260908191416121.log",
+                    "sha256": "c115fccaf081a09b737d87c807cd3e108cb55276c65b9f214f65dde68b6b677d"
+                  },
+                  {
+                    "bytes": 36755,
+                    "path": "run/plog/plog-819645_20260908191411510.log",
+                    "sha256": "314a3cc509c21c726acaf68ed0d9ef42f9ed73738eb511c0a9cfe7ae07e631a8"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "host_log": {
+                "bytes": 0,
+                "path": "wse_surrogate_stage1c.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "pid": 819645,
+              "success": true
+            }
+          },
+          "evidence_status": "SIMULATION",
+          "fallback_used": false,
+          "generation": 1,
+          "host_bounce_bytes": 0,
+          "npu_wse_capability_level": "NOT_ESTABLISHED",
+          "observation": {
+            "accepting_new_requests": false,
+            "backend": "cann_acl_vmm_p2p",
+            "case_id": "T10",
+            "configured_timeout_cycles": 500000000,
+            "driver_binary_sha256": "ad2e7d63a2356271cd961903667b915d94866710617ee77496c727ee3cded4b0",
+            "driver_report": {
+              "accepted": 1,
+              "accepting_new_requests": 0,
+              "completions": 0,
+              "configured_timeout_cycles": 500000000,
+              "credits_returned": 0,
+              "elapsed_cycles": 500000052,
+              "forged_success_completions": 0,
+              "generation_errors": 0,
+              "generation_unhealthy": 1,
+              "input_fences": 1,
+              "mode": 10,
+              "output_fences": 0,
+              "quarantined_slots": 1,
+              "reserved": 0,
+              "sequence_errors": 0,
+              "service_pause_observed": 1,
+              "slot_reuse_after_timeout": 0,
+              "submissions": 1,
+              "successes": 0,
+              "terminal_errors": 1,
+              "timed_out": 1,
+              "timeout_within_bound": 1,
+              "timeouts": 1,
+              "validation_errors": 0
+            },
+            "fallback_used": false,
+            "forged_success_completions": 0,
+            "generation": 1,
+            "generation_unhealthy": true,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "host_bounce_bytes": 0,
+            "host_hot_path_messages": 0,
+            "host_hot_path_payload_bytes": 0,
+            "passed": true,
+            "quarantined_slots": 1,
+            "service_binary_sha256": "625bbefa8084890eaf46d21acfb435b8982f7ee8633e2dfc79ed75f6367a7661",
+            "service_report": {
+              "accepted": 1,
+              "accepting_new_requests": 0,
+              "completions": 0,
+              "configured_timeout_cycles": 500000000,
+              "credits_returned": 0,
+              "elapsed_cycles": 500000006,
+              "forged_success_completions": 0,
+              "generation_errors": 0,
+              "generation_unhealthy": 1,
+              "input_fences": 0,
+              "mode": 10,
+              "output_fences": 0,
+              "quarantined_slots": 1,
+              "reserved": 0,
+              "sequence_errors": 0,
+              "service_pause_observed": 1,
+              "slot_reuse_after_timeout": 0,
+              "submissions": 1,
+              "successes": 0,
+              "terminal_errors": 1,
+              "timed_out": 1,
+              "timeout_within_bound": 1,
+              "timeouts": 1,
+              "validation_errors": 0
+            },
+            "slot_reuse_after_timeout": 0,
+            "timeout_error": "WSE_UNRESPONSIVE_TIMEOUT",
+            "transport_scope": "HOST_LOCAL"
+          },
+          "profile": "NPU_SURROGATE",
+          "resource_cleanup": "VERIFIED",
+          "run_id": "stage1c-699707357c6043f299b2fa2e25e2f552",
+          "schema_version": 1,
+          "stage1c_progress": "T10_PASS",
+          "start_order": "attention-first",
+          "success": true,
+          "transport_scope": "HOST_LOCAL"
+        },
+        "task_id": "task_20260908_191410_8194701298"
+      },
+      {
+        "endpoints": {
+          "ATTENTION": {
+            "case_id": "T10",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 1159,
+              "received_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              },
+              "sent_bytes": 1135,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              }
+            },
+            "device_id": 0,
+            "device_loop": {
+              "binary_sha256": "ad2e7d63a2356271cd961903667b915d94866710617ee77496c727ee3cded4b0",
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1c_fault_driver_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "accepted": 1,
+                "accepting_new_requests": 0,
+                "completions": 0,
+                "configured_timeout_cycles": 500000000,
+                "credits_returned": 0,
+                "elapsed_cycles": 500000019,
+                "forged_success_completions": 0,
+                "generation_errors": 0,
+                "generation_unhealthy": 1,
+                "input_fences": 1,
+                "mode": 10,
+                "output_fences": 0,
+                "quarantined_slots": 1,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "service_pause_observed": 1,
+                "slot_reuse_after_timeout": 0,
+                "submissions": 1,
+                "successes": 0,
+                "terminal_errors": 1,
+                "timed_out": 1,
+                "timeout_within_bound": 1,
+                "timeouts": 1,
+                "validation_errors": 0
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": {
+              "close_order": [],
+              "duplicate_close_attempts": 0,
+              "duplicate_close_rejections": 0,
+              "idempotent_close_successes": 0
+            },
+            "manifest": {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 0,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1048896,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "346a73f6847cb74d8637c02fc7b1799df9187ce8188d6bd225cc38a6d68e7055"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            "metrics": {
+              "host_cpu_ns": 53070890,
+              "host_cpu_utilization_pct": 10.620564867853451,
+              "host_memory_growth_bytes": 0,
+              "host_wall_ns": 499699316,
+              "initial_rss_bytes": 24416256,
+              "kernel_elapsed_ns": 500327048,
+              "post_kernel_rss_bytes": 139640832,
+              "process_residual_growth_bytes": 74625024,
+              "runtime_setup_growth_bytes": 115224576,
+              "steady_state_rss_bytes": 139640832
+            },
+            "old_peer_handle_probe": null,
+            "role": "ATTENTION",
+            "success": true
+          },
+          "WSE_SURROGATE": {
+            "case_id": "T10",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 1135,
+              "received_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              },
+              "sent_bytes": 1159,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              }
+            },
+            "device_id": 1,
+            "device_loop": {
+              "binary_sha256": "625bbefa8084890eaf46d21acfb435b8982f7ee8633e2dfc79ed75f6367a7661",
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1c_fault_service_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "accepted": 1,
+                "accepting_new_requests": 0,
+                "completions": 0,
+                "configured_timeout_cycles": 500000000,
+                "credits_returned": 0,
+                "elapsed_cycles": 500000005,
+                "forged_success_completions": 0,
+                "generation_errors": 0,
+                "generation_unhealthy": 1,
+                "input_fences": 0,
+                "mode": 10,
+                "output_fences": 0,
+                "quarantined_slots": 1,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "service_pause_observed": 1,
+                "slot_reuse_after_timeout": 0,
+                "submissions": 1,
+                "successes": 0,
+                "terminal_errors": 1,
+                "timed_out": 1,
+                "timeout_within_bound": 1,
+                "timeouts": 1,
+                "validation_errors": 0
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": {
+              "close_order": [],
+              "duplicate_close_attempts": 0,
+              "duplicate_close_rejections": 0,
+              "idempotent_close_successes": 0
+            },
+            "manifest": {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 1,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1048896,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "526fa954ca2c5e595c23639c4de5c4a0de9a2e7d129350f490799980e94f662f"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            "metrics": {
+              "host_cpu_ns": 55604757,
+              "host_cpu_utilization_pct": 11.123842419901878,
+              "host_memory_growth_bytes": 0,
+              "host_wall_ns": 499870053,
+              "initial_rss_bytes": 24293376,
+              "kernel_elapsed_ns": 500262382,
+              "post_kernel_rss_bytes": 139657216,
+              "process_residual_growth_bytes": 74764288,
+              "runtime_setup_growth_bytes": 115363840,
+              "steady_state_rss_bytes": 139657216
+            },
+            "old_peer_handle_probe": null,
+            "role": "WSE_SURROGATE",
+            "success": true
+          }
+        },
+        "observation": {
+          "accepting_new_requests": false,
+          "backend": "cann_acl_vmm_p2p",
+          "case_id": "T10",
+          "configured_timeout_cycles": 500000000,
+          "driver_binary_sha256": "ad2e7d63a2356271cd961903667b915d94866710617ee77496c727ee3cded4b0",
+          "driver_report": {
+            "accepted": 1,
+            "accepting_new_requests": 0,
+            "completions": 0,
+            "configured_timeout_cycles": 500000000,
+            "credits_returned": 0,
+            "elapsed_cycles": 500000019,
+            "forged_success_completions": 0,
+            "generation_errors": 0,
+            "generation_unhealthy": 1,
+            "input_fences": 1,
+            "mode": 10,
+            "output_fences": 0,
+            "quarantined_slots": 1,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "service_pause_observed": 1,
+            "slot_reuse_after_timeout": 0,
+            "submissions": 1,
+            "successes": 0,
+            "terminal_errors": 1,
+            "timed_out": 1,
+            "timeout_within_bound": 1,
+            "timeouts": 1,
+            "validation_errors": 0
+          },
+          "fallback_used": false,
+          "forged_success_completions": 0,
+          "generation": 1,
+          "generation_unhealthy": true,
+          "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+          "host_bounce_bytes": 0,
+          "host_hot_path_messages": 0,
+          "host_hot_path_payload_bytes": 0,
+          "passed": true,
+          "quarantined_slots": 1,
+          "service_binary_sha256": "625bbefa8084890eaf46d21acfb435b8982f7ee8633e2dfc79ed75f6367a7661",
+          "service_report": {
+            "accepted": 1,
+            "accepting_new_requests": 0,
+            "completions": 0,
+            "configured_timeout_cycles": 500000000,
+            "credits_returned": 0,
+            "elapsed_cycles": 500000005,
+            "forged_success_completions": 0,
+            "generation_errors": 0,
+            "generation_unhealthy": 1,
+            "input_fences": 0,
+            "mode": 10,
+            "output_fences": 0,
+            "quarantined_slots": 1,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "service_pause_observed": 1,
+            "slot_reuse_after_timeout": 0,
+            "submissions": 1,
+            "successes": 0,
+            "terminal_errors": 1,
+            "timed_out": 1,
+            "timeout_within_bound": 1,
+            "timeouts": 1,
+            "validation_errors": 0
+          },
+          "slot_reuse_after_timeout": 0,
+          "timeout_error": "WSE_UNRESPONSIVE_TIMEOUT",
+          "transport_scope": "HOST_LOCAL"
+        },
+        "result": {
+          "actual_backend": "cann_acl_vmm_p2p",
+          "c2_status": "NOT_ESTABLISHED",
+          "capability_level": "C1",
+          "claim_scope": "NPU_SURROGATE_ONLY",
+          "completed_at": "2026-09-08T11:14:45.319108+00:00",
+          "data_results": {
+            "T10": {
+              "attempts": 1,
+              "passed": 1,
+              "status": "PASS"
+            }
+          },
+          "devices": {
+            "ATTENTION": 0,
+            "WSE_SURROGATE": 1
+          },
+          "endpoints": {
+            "ATTENTION": {
+              "artifact": "attention_stage1c.json",
+              "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 11045,
+                    "path": "run/device-0/device-825619_20260908191442635.log",
+                    "sha256": "8f8581a204ac9a8656ec9170821e13ae9e422e812be1837e4a4e9d560610ef54"
+                  },
+                  {
+                    "bytes": 36755,
+                    "path": "run/plog/plog-825619_20260908191438360.log",
+                    "sha256": "000316c33393dbd7fb9ba6169ab26b8e18c25ff6285193c346152e80554fda40"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "host_log": {
+                "bytes": 0,
+                "path": "attention_stage1c.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "pid": 825619,
+              "success": true
+            },
+            "WSE_SURROGATE": {
+              "artifact": "wse_surrogate_stage1c.json",
+              "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 11046,
+                    "path": "run/device-1/device-825594_20260908191442146.log",
+                    "sha256": "c5e5500598265ab43c605a346fe282822ed897f47dabe468cec5ded8d2af79a4"
+                  },
+                  {
+                    "bytes": 36755,
+                    "path": "run/plog/plog-825594_20260908191438108.log",
+                    "sha256": "c8393404bbd02c90f14cf0cf52480a2099d9d72e8c9a5beafc3c6ee8d0da1f69"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "host_log": {
+                "bytes": 0,
+                "path": "wse_surrogate_stage1c.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "pid": 825594,
+              "success": true
+            }
+          },
+          "evidence_status": "SIMULATION",
+          "fallback_used": false,
+          "generation": 1,
+          "host_bounce_bytes": 0,
+          "npu_wse_capability_level": "NOT_ESTABLISHED",
+          "observation": {
+            "accepting_new_requests": false,
+            "backend": "cann_acl_vmm_p2p",
+            "case_id": "T10",
+            "configured_timeout_cycles": 500000000,
+            "driver_binary_sha256": "ad2e7d63a2356271cd961903667b915d94866710617ee77496c727ee3cded4b0",
+            "driver_report": {
+              "accepted": 1,
+              "accepting_new_requests": 0,
+              "completions": 0,
+              "configured_timeout_cycles": 500000000,
+              "credits_returned": 0,
+              "elapsed_cycles": 500000019,
+              "forged_success_completions": 0,
+              "generation_errors": 0,
+              "generation_unhealthy": 1,
+              "input_fences": 1,
+              "mode": 10,
+              "output_fences": 0,
+              "quarantined_slots": 1,
+              "reserved": 0,
+              "sequence_errors": 0,
+              "service_pause_observed": 1,
+              "slot_reuse_after_timeout": 0,
+              "submissions": 1,
+              "successes": 0,
+              "terminal_errors": 1,
+              "timed_out": 1,
+              "timeout_within_bound": 1,
+              "timeouts": 1,
+              "validation_errors": 0
+            },
+            "fallback_used": false,
+            "forged_success_completions": 0,
+            "generation": 1,
+            "generation_unhealthy": true,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "host_bounce_bytes": 0,
+            "host_hot_path_messages": 0,
+            "host_hot_path_payload_bytes": 0,
+            "passed": true,
+            "quarantined_slots": 1,
+            "service_binary_sha256": "625bbefa8084890eaf46d21acfb435b8982f7ee8633e2dfc79ed75f6367a7661",
+            "service_report": {
+              "accepted": 1,
+              "accepting_new_requests": 0,
+              "completions": 0,
+              "configured_timeout_cycles": 500000000,
+              "credits_returned": 0,
+              "elapsed_cycles": 500000005,
+              "forged_success_completions": 0,
+              "generation_errors": 0,
+              "generation_unhealthy": 1,
+              "input_fences": 0,
+              "mode": 10,
+              "output_fences": 0,
+              "quarantined_slots": 1,
+              "reserved": 0,
+              "sequence_errors": 0,
+              "service_pause_observed": 1,
+              "slot_reuse_after_timeout": 0,
+              "submissions": 1,
+              "successes": 0,
+              "terminal_errors": 1,
+              "timed_out": 1,
+              "timeout_within_bound": 1,
+              "timeouts": 1,
+              "validation_errors": 0
+            },
+            "slot_reuse_after_timeout": 0,
+            "timeout_error": "WSE_UNRESPONSIVE_TIMEOUT",
+            "transport_scope": "HOST_LOCAL"
+          },
+          "profile": "NPU_SURROGATE",
+          "resource_cleanup": "VERIFIED",
+          "run_id": "stage1c-ad70e320f2824743afdb38219834122b",
+          "schema_version": 1,
+          "stage1c_progress": "T10_PASS",
+          "start_order": "wse-first",
+          "success": true,
+          "transport_scope": "HOST_LOCAL"
+        },
+        "task_id": "task_20260908_191437_82545123675"
+      }
+    ],
+    "T11": [
+      {
+        "endpoints": {
+          "ATTENTION": {
+            "case_id": "T11",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 688,
+              "received_messages": {
+                "ATTACHED": 1,
+                "MANIFEST": 1,
+                "READY": 1
+              },
+              "sent_bytes": 676,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "MANIFEST": 1,
+                "READY": 1
+              }
+            },
+            "device_id": 0,
+            "device_loop": {
+              "binary_sha256": "ad2e7d63a2356271cd961903667b915d94866710617ee77496c727ee3cded4b0",
+              "elapsed_ns": 20001115994,
+              "kernel": "pypto_stage1c_fault_driver_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "accepted": 1,
+                "accepting_new_requests": 0,
+                "completions": 0,
+                "configured_timeout_cycles": 20000000000,
+                "credits_returned": 0,
+                "elapsed_cycles": 20000000059,
+                "forged_success_completions": 0,
+                "generation_errors": 0,
+                "generation_unhealthy": 1,
+                "input_fences": 1,
+                "mode": 11,
+                "output_fences": 0,
+                "quarantined_slots": 1,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "service_pause_observed": 1,
+                "slot_reuse_after_timeout": 0,
+                "submissions": 1,
+                "successes": 0,
+                "terminal_errors": 1,
+                "timed_out": 1,
+                "timeout_within_bound": 1,
+                "timeouts": 1,
+                "validation_errors": 0
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": null,
+            "manifest": null,
+            "metrics": null,
+            "old_peer_handle_probe": {
+              "api": "aclrtMemImportFromShareableHandle",
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "520cd5a5a626ec29fef473555e1482f4db0200fe1d82fbb39e50170e2dcd678f"
+              },
+              "rejected": true,
+              "result_code": 507899
+            },
+            "role": "ATTENTION",
+            "success": true
+          },
+          "WSE_SURROGATE": null
+        },
+        "observation": {
+          "case_id": "T11",
+          "generation": 1,
+          "launcher_reported_expected_failure": true,
+          "limitation": "SAME_HOST_PROCESS_EXIT_NOT_HOST_POWER_LOSS_OR_NETWORK_PARTITION",
+          "next_generation": 2,
+          "old_handle_probe_result": 507899,
+          "old_handle_rejected": true,
+          "old_resource_reused": false,
+          "passed": true,
+          "recovery_success": true,
+          "recovery_validated_sequences": 100,
+          "survivor_cleanup_complete": true,
+          "survivor_report": {
+            "accepted": 1,
+            "accepting_new_requests": 0,
+            "completions": 0,
+            "configured_timeout_cycles": 20000000000,
+            "credits_returned": 0,
+            "elapsed_cycles": 20000000059,
+            "forged_success_completions": 0,
+            "generation_errors": 0,
+            "generation_unhealthy": 1,
+            "input_fences": 1,
+            "mode": 11,
+            "output_fences": 0,
+            "quarantined_slots": 1,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "service_pause_observed": 1,
+            "slot_reuse_after_timeout": 0,
+            "submissions": 1,
+            "successes": 0,
+            "terminal_errors": 1,
+            "timed_out": 1,
+            "timeout_within_bound": 1,
+            "timeouts": 1,
+            "validation_errors": 0
+          },
+          "survivor_role": "ATTENTION",
+          "survivor_wait_bounded": true,
+          "victim_exit_code": -9,
+          "victim_role": "WSE_SURROGATE"
+        },
+        "result": {
+          "actual_backend": "CANN_ACL_VMM_P2P",
+          "c2_status": "NOT_ESTABLISHED",
+          "capability_level": "C1",
+          "claim_scope": "NPU_SURROGATE_ONLY",
+          "completed_at": "2026-09-08T11:12:07.203575+00:00",
+          "data_results": {
+            "T11": {
+              "attempts": 1,
+              "passed": 1,
+              "status": "PASS"
+            }
+          },
+          "devices": {
+            "ATTENTION": 0,
+            "WSE_SURROGATE": 1
+          },
+          "endpoints": {
+            "ATTENTION": {
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 1221,
+                    "path": "debug/plog/plog-805333_20260908191156157.log",
+                    "sha256": "588dd68b85fa32c235a4114a736f103dfb402bd2f854f05e2ccfeee452829193"
+                  },
+                  {
+                    "bytes": 11045,
+                    "path": "run/device-0/device-805333_20260908191137997.log",
+                    "sha256": "a56e3000fd328fe59794d3d639f53091f7dab30b12099186a0938996f11c506c"
+                  },
+                  {
+                    "bytes": 36884,
+                    "path": "run/plog/plog-805333_20260908191134104.log",
+                    "sha256": "f308c33c43aa6658985fc90e69466cd31e8c5f916dede70866c278c279abc2ed"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "expected_process_exit": false,
+              "host_log": {
+                "bytes": 0,
+                "path": "attention_stage1c_t11.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "success": true
+            },
+            "WSE_SURROGATE": {
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 19224,
+                    "path": "run/plog/plog-805345_20260908191134354.log",
+                    "sha256": "a2a4d9b87e4fed7142d9ab0ab8dfcba3a051abe68415d83457eb91e65ba38772"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": false
+              },
+              "exit_code": -9,
+              "expected_process_exit": true,
+              "host_log": {
+                "bytes": 0,
+                "path": "wse_surrogate_stage1c_t11.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "success": true
+            }
+          },
+          "evidence_status": "SIMULATION",
+          "fault_injection": {
+            "signal": "SIGKILL",
+            "victim_role": "WSE_SURROGATE"
+          },
+          "generation": 1,
+          "next_generation": 2,
+          "npu_wse_capability_level": "NOT_ESTABLISHED",
+          "observation": {
+            "case_id": "T11",
+            "generation": 1,
+            "launcher_reported_expected_failure": true,
+            "limitation": "SAME_HOST_PROCESS_EXIT_NOT_HOST_POWER_LOSS_OR_NETWORK_PARTITION",
+            "next_generation": 2,
+            "old_handle_probe_result": 507899,
+            "old_handle_rejected": true,
+            "old_resource_reused": false,
+            "passed": true,
+            "recovery_success": true,
+            "recovery_validated_sequences": 100,
+            "survivor_cleanup_complete": true,
+            "survivor_report": {
+              "accepted": 1,
+              "accepting_new_requests": 0,
+              "completions": 0,
+              "configured_timeout_cycles": 20000000000,
+              "credits_returned": 0,
+              "elapsed_cycles": 20000000059,
+              "forged_success_completions": 0,
+              "generation_errors": 0,
+              "generation_unhealthy": 1,
+              "input_fences": 1,
+              "mode": 11,
+              "output_fences": 0,
+              "quarantined_slots": 1,
+              "reserved": 0,
+              "sequence_errors": 0,
+              "service_pause_observed": 1,
+              "slot_reuse_after_timeout": 0,
+              "submissions": 1,
+              "successes": 0,
+              "terminal_errors": 1,
+              "timed_out": 1,
+              "timeout_within_bound": 1,
+              "timeouts": 1,
+              "validation_errors": 0
+            },
+            "survivor_role": "ATTENTION",
+            "survivor_wait_bounded": true,
+            "victim_exit_code": -9,
+            "victim_role": "WSE_SURROGATE"
+          },
+          "profile": "NPU_SURROGATE",
+          "recovery": {
+            "artifact": "recovery/result.json",
+            "host_log": {
+              "bytes": 0,
+              "path": "recovery.log",
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "return_code": 0,
+            "success": true
+          },
+          "run_id": "stage1c-t11-2a30439b3e8446b0b6101aee5c22075f",
+          "schema_version": 1,
+          "stage1c_progress": "T11_PASS",
+          "start_order": "attention-first",
+          "success": true,
+          "transport_scope": "HOST_LOCAL"
+        },
+        "task_id": "task_20260908_191133_80518318851"
+      },
+      {
+        "endpoints": {
+          "ATTENTION": null,
+          "WSE_SURROGATE": {
+            "case_id": "T11",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 676,
+              "received_messages": {
+                "ATTACHED": 1,
+                "MANIFEST": 1,
+                "READY": 1
+              },
+              "sent_bytes": 688,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "MANIFEST": 1,
+                "READY": 1
+              }
+            },
+            "device_id": 1,
+            "device_loop": {
+              "binary_sha256": "625bbefa8084890eaf46d21acfb435b8982f7ee8633e2dfc79ed75f6367a7661",
+              "elapsed_ns": 20001083125,
+              "kernel": "pypto_stage1c_fault_service_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "accepted": 1,
+                "accepting_new_requests": 0,
+                "completions": 0,
+                "configured_timeout_cycles": 20000000000,
+                "credits_returned": 0,
+                "elapsed_cycles": 20000000005,
+                "forged_success_completions": 0,
+                "generation_errors": 0,
+                "generation_unhealthy": 1,
+                "input_fences": 0,
+                "mode": 11,
+                "output_fences": 0,
+                "quarantined_slots": 1,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "service_pause_observed": 1,
+                "slot_reuse_after_timeout": 0,
+                "submissions": 1,
+                "successes": 0,
+                "terminal_errors": 1,
+                "timed_out": 1,
+                "timeout_within_bound": 1,
+                "timeouts": 1,
+                "validation_errors": 0
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": null,
+            "manifest": null,
+            "metrics": null,
+            "old_peer_handle_probe": {
+              "api": "aclrtMemImportFromShareableHandle",
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "0a7bfd14f88b30d33cb7090f01d1a0c7f81d27dd70b40b883581195ff616aced"
+              },
+              "rejected": true,
+              "result_code": 507899
+            },
+            "role": "WSE_SURROGATE",
+            "success": true
+          }
+        },
+        "observation": {
+          "case_id": "T11",
+          "generation": 1,
+          "launcher_reported_expected_failure": true,
+          "limitation": "SAME_HOST_PROCESS_EXIT_NOT_HOST_POWER_LOSS_OR_NETWORK_PARTITION",
+          "next_generation": 2,
+          "old_handle_probe_result": 507899,
+          "old_handle_rejected": true,
+          "old_resource_reused": false,
+          "passed": true,
+          "recovery_success": true,
+          "recovery_validated_sequences": 100,
+          "survivor_cleanup_complete": true,
+          "survivor_report": {
+            "accepted": 1,
+            "accepting_new_requests": 0,
+            "completions": 0,
+            "configured_timeout_cycles": 20000000000,
+            "credits_returned": 0,
+            "elapsed_cycles": 20000000005,
+            "forged_success_completions": 0,
+            "generation_errors": 0,
+            "generation_unhealthy": 1,
+            "input_fences": 0,
+            "mode": 11,
+            "output_fences": 0,
+            "quarantined_slots": 1,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "service_pause_observed": 1,
+            "slot_reuse_after_timeout": 0,
+            "submissions": 1,
+            "successes": 0,
+            "terminal_errors": 1,
+            "timed_out": 1,
+            "timeout_within_bound": 1,
+            "timeouts": 1,
+            "validation_errors": 0
+          },
+          "survivor_role": "WSE_SURROGATE",
+          "survivor_wait_bounded": true,
+          "victim_exit_code": -9,
+          "victim_role": "ATTENTION"
+        },
+        "result": {
+          "actual_backend": "CANN_ACL_VMM_P2P",
+          "c2_status": "NOT_ESTABLISHED",
+          "capability_level": "C1",
+          "claim_scope": "NPU_SURROGATE_ONLY",
+          "completed_at": "2026-09-08T11:15:38.034682+00:00",
+          "data_results": {
+            "T11": {
+              "attempts": 1,
+              "passed": 1,
+              "status": "PASS"
+            }
+          },
+          "devices": {
+            "ATTENTION": 0,
+            "WSE_SURROGATE": 1
+          },
+          "endpoints": {
+            "ATTENTION": {
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 19224,
+                    "path": "run/plog/plog-832108_20260908191504413.log",
+                    "sha256": "60ce0e588927a0fd557ef8520e991f79ddc233d687b90e7cebf50b6e2bbc875a"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": false
+              },
+              "exit_code": -9,
+              "expected_process_exit": true,
+              "host_log": {
+                "bytes": 0,
+                "path": "attention_stage1c_t11.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "success": true
+            },
+            "WSE_SURROGATE": {
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 1221,
+                    "path": "debug/plog/plog-832083_20260908191526138.log",
+                    "sha256": "e3fc3115359e136b48cdb4ce81ab9ce9aaa5c9f6190b8da28bd87e5170877da9"
+                  },
+                  {
+                    "bytes": 11046,
+                    "path": "run/device-1/device-832083_20260908191508213.log",
+                    "sha256": "2369b10f9bc13e59e13b31aff1573ca62cbc9f2fb9f9d6ad700c48c5aafc75e1"
+                  },
+                  {
+                    "bytes": 36884,
+                    "path": "run/plog/plog-832083_20260908191504162.log",
+                    "sha256": "7426df1ca78815d2c8f987db70890f0263b1583ab1763486563551ba62ac67c7"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "expected_process_exit": false,
+              "host_log": {
+                "bytes": 0,
+                "path": "wse_surrogate_stage1c_t11.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "success": true
+            }
+          },
+          "evidence_status": "SIMULATION",
+          "fault_injection": {
+            "signal": "SIGKILL",
+            "victim_role": "ATTENTION"
+          },
+          "generation": 1,
+          "next_generation": 2,
+          "npu_wse_capability_level": "NOT_ESTABLISHED",
+          "observation": {
+            "case_id": "T11",
+            "generation": 1,
+            "launcher_reported_expected_failure": true,
+            "limitation": "SAME_HOST_PROCESS_EXIT_NOT_HOST_POWER_LOSS_OR_NETWORK_PARTITION",
+            "next_generation": 2,
+            "old_handle_probe_result": 507899,
+            "old_handle_rejected": true,
+            "old_resource_reused": false,
+            "passed": true,
+            "recovery_success": true,
+            "recovery_validated_sequences": 100,
+            "survivor_cleanup_complete": true,
+            "survivor_report": {
+              "accepted": 1,
+              "accepting_new_requests": 0,
+              "completions": 0,
+              "configured_timeout_cycles": 20000000000,
+              "credits_returned": 0,
+              "elapsed_cycles": 20000000005,
+              "forged_success_completions": 0,
+              "generation_errors": 0,
+              "generation_unhealthy": 1,
+              "input_fences": 0,
+              "mode": 11,
+              "output_fences": 0,
+              "quarantined_slots": 1,
+              "reserved": 0,
+              "sequence_errors": 0,
+              "service_pause_observed": 1,
+              "slot_reuse_after_timeout": 0,
+              "submissions": 1,
+              "successes": 0,
+              "terminal_errors": 1,
+              "timed_out": 1,
+              "timeout_within_bound": 1,
+              "timeouts": 1,
+              "validation_errors": 0
+            },
+            "survivor_role": "WSE_SURROGATE",
+            "survivor_wait_bounded": true,
+            "victim_exit_code": -9,
+            "victim_role": "ATTENTION"
+          },
+          "profile": "NPU_SURROGATE",
+          "recovery": {
+            "artifact": "recovery/result.json",
+            "host_log": {
+              "bytes": 0,
+              "path": "recovery.log",
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "return_code": 0,
+            "success": true
+          },
+          "run_id": "stage1c-t11-bcadf84690704d2fbaa5df1aee2010e0",
+          "schema_version": 1,
+          "stage1c_progress": "T11_PASS",
+          "start_order": "wse-first",
+          "success": true,
+          "transport_scope": "HOST_LOCAL"
+        },
+        "task_id": "task_20260908_191503_8319349735"
+      }
+    ],
+    "T12": [
+      {
+        "endpoints": {
+          "ATTENTION": {
+            "case_id": "T12",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 1159,
+              "received_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              },
+              "sent_bytes": 1135,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              }
+            },
+            "device_id": 0,
+            "device_loop": {
+              "binary_sha256": "713684ebfc8fada9ba1b7612a3cb4108298137064fa2b27da8971e2e3c9baf35",
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1c_t12_driver_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "accepted": 4,
+                "checksum_errors": 0,
+                "completions": 4,
+                "credits_acquired": 4,
+                "credits_returned": 4,
+                "drain_completed": 1,
+                "drain_started": 1,
+                "elapsed_cycles": 1225588,
+                "generation_errors": 0,
+                "input_fences": 4,
+                "marker_errors": 0,
+                "max_inflight": 2,
+                "output_fences": 0,
+                "post_stop_attempts": 1,
+                "post_stop_rejections": 1,
+                "processed": 4,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "service_stopped": 1,
+                "stop_new_submissions": 1,
+                "submissions": 4,
+                "terminal_tasks": 4,
+                "timeouts": 0,
+                "validation_errors": 0
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": {
+              "close_order": [
+                "STOP_NEW_SUBMISSIONS",
+                "DRAIN_ACCEPTED_REQUESTS",
+                "VALIDATE_CREDITS_RETURNED",
+                "STOP_SERVICE",
+                "RELEASE_PEER_IMPORT",
+                "UNREGISTER_LOCAL_WINDOW",
+                "FREE_LOCAL_MEMORY",
+                "DESTROY_RUNTIME"
+              ],
+              "duplicate_close_attempts": 4,
+              "duplicate_close_rejections": 0,
+              "idempotent_close_successes": 4
+            },
+            "manifest": {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 0,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1049088,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "642ed01306a587ec14115168e86cdc33ce3f0468f5aa3180fb33ef3abae5b591"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            "metrics": {
+              "host_cpu_ns": 408224,
+              "host_cpu_utilization_pct": 95.11165992940437,
+              "host_memory_growth_bytes": 4096,
+              "host_wall_ns": 429205,
+              "initial_rss_bytes": 24305664,
+              "kernel_elapsed_ns": 1346862,
+              "post_kernel_rss_bytes": 139689984,
+              "process_residual_growth_bytes": 74784768,
+              "runtime_setup_growth_bytes": 115380224,
+              "steady_state_rss_bytes": 139685888
+            },
+            "old_peer_handle_probe": null,
+            "role": "ATTENTION",
+            "success": true
+          },
+          "WSE_SURROGATE": {
+            "case_id": "T12",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 1135,
+              "received_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              },
+              "sent_bytes": 1159,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              }
+            },
+            "device_id": 1,
+            "device_loop": {
+              "binary_sha256": "0418050432af5ef079df7af6b1e0255e13da85fd31f2db020194cfea07b137ee",
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1c_t12_service_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "accepted": 4,
+                "checksum_errors": 0,
+                "completions": 4,
+                "credits_acquired": 0,
+                "credits_returned": 0,
+                "drain_completed": 1,
+                "drain_started": 1,
+                "elapsed_cycles": 681886,
+                "generation_errors": 0,
+                "input_fences": 0,
+                "marker_errors": 0,
+                "max_inflight": 2,
+                "output_fences": 4,
+                "post_stop_attempts": 1,
+                "post_stop_rejections": 1,
+                "processed": 4,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "service_stopped": 1,
+                "stop_new_submissions": 1,
+                "submissions": 4,
+                "terminal_tasks": 4,
+                "timeouts": 0,
+                "validation_errors": 0
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": {
+              "close_order": [
+                "STOP_NEW_SUBMISSIONS",
+                "DRAIN_ACCEPTED_REQUESTS",
+                "VALIDATE_CREDITS_RETURNED",
+                "STOP_SERVICE",
+                "RELEASE_PEER_IMPORT",
+                "UNREGISTER_LOCAL_WINDOW",
+                "FREE_LOCAL_MEMORY",
+                "DESTROY_RUNTIME"
+              ],
+              "duplicate_close_attempts": 4,
+              "duplicate_close_rejections": 0,
+              "idempotent_close_successes": 4
+            },
+            "manifest": {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 1,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1049088,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "c93fb84efe20e31f4e30d1598426b5bde8a8094f00e259e924324653fc851ed4"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            "metrics": {
+              "host_cpu_ns": 467932,
+              "host_cpu_utilization_pct": 100.0,
+              "host_memory_growth_bytes": 4096,
+              "host_wall_ns": 370156,
+              "initial_rss_bytes": 24281088,
+              "kernel_elapsed_ns": 859730,
+              "post_kernel_rss_bytes": 139673600,
+              "process_residual_growth_bytes": 74788864,
+              "runtime_setup_growth_bytes": 115388416,
+              "steady_state_rss_bytes": 139669504
+            },
+            "old_peer_handle_probe": null,
+            "role": "WSE_SURROGATE",
+            "success": true
+          }
+        },
+        "observation": {
+          "accepted_tasks": 4,
+          "backend": "cann_acl_vmm_p2p",
+          "case_id": "T12",
+          "close_order": [
+            "STOP_NEW_SUBMISSIONS",
+            "DRAIN_ACCEPTED_REQUESTS",
+            "VALIDATE_CREDITS_RETURNED",
+            "STOP_SERVICE",
+            "RELEASE_PEER_IMPORT",
+            "UNREGISTER_LOCAL_WINDOW",
+            "FREE_LOCAL_MEMORY",
+            "DESTROY_RUNTIME"
+          ],
+          "credits_acquired": 4,
+          "credits_returned": 4,
+          "driver_binary_sha256": "713684ebfc8fada9ba1b7612a3cb4108298137064fa2b27da8971e2e3c9baf35",
+          "driver_report": {
+            "accepted": 4,
+            "checksum_errors": 0,
+            "completions": 4,
+            "credits_acquired": 4,
+            "credits_returned": 4,
+            "drain_completed": 1,
+            "drain_started": 1,
+            "elapsed_cycles": 1225588,
+            "generation_errors": 0,
+            "input_fences": 4,
+            "marker_errors": 0,
+            "max_inflight": 2,
+            "output_fences": 0,
+            "post_stop_attempts": 1,
+            "post_stop_rejections": 1,
+            "processed": 4,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "service_stopped": 1,
+            "stop_new_submissions": 1,
+            "submissions": 4,
+            "terminal_tasks": 4,
+            "timeouts": 0,
+            "validation_errors": 0
+          },
+          "duplicate_close_attempts": 8,
+          "duplicate_close_rejections": 0,
+          "early_window_releases": 0,
+          "fallback_used": false,
+          "generation": 1,
+          "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+          "host_bounce_bytes": 0,
+          "host_hot_path_messages": 0,
+          "host_hot_path_payload_bytes": 0,
+          "idempotent_close_successes": 8,
+          "passed": true,
+          "residual_contexts": 0,
+          "residual_queues": 0,
+          "residual_registrations": 0,
+          "residual_windows": 0,
+          "service_binary_sha256": "0418050432af5ef079df7af6b1e0255e13da85fd31f2db020194cfea07b137ee",
+          "service_report": {
+            "accepted": 4,
+            "checksum_errors": 0,
+            "completions": 4,
+            "credits_acquired": 0,
+            "credits_returned": 0,
+            "drain_completed": 1,
+            "drain_started": 1,
+            "elapsed_cycles": 681886,
+            "generation_errors": 0,
+            "input_fences": 0,
+            "marker_errors": 0,
+            "max_inflight": 2,
+            "output_fences": 4,
+            "post_stop_attempts": 1,
+            "post_stop_rejections": 1,
+            "processed": 4,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "service_stopped": 1,
+            "stop_new_submissions": 1,
+            "submissions": 4,
+            "terminal_tasks": 4,
+            "timeouts": 0,
+            "validation_errors": 0
+          },
+          "terminal_outcomes": 4,
+          "transport_scope": "HOST_LOCAL"
+        },
+        "result": {
+          "actual_backend": "cann_acl_vmm_p2p",
+          "c2_status": "NOT_ESTABLISHED",
+          "capability_level": "C1",
+          "claim_scope": "NPU_SURROGATE_ONLY",
+          "completed_at": "2026-09-08T11:16:09.332926+00:00",
+          "data_results": {
+            "T12": {
+              "attempts": 4,
+              "passed": 4,
+              "status": "PASS"
+            }
+          },
+          "devices": {
+            "ATTENTION": 0,
+            "WSE_SURROGATE": 1
+          },
+          "endpoints": {
+            "ATTENTION": {
+              "artifact": "attention_stage1c.json",
+              "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 11045,
+                    "path": "run/device-0/device-836309_20260908191604815.log",
+                    "sha256": "0ac39b3c4d17c40077659d4b8af170086569bb44312f283d1a1bff04371254a8"
+                  },
+                  {
+                    "bytes": 36755,
+                    "path": "run/plog/plog-836309_20260908191600971.log",
+                    "sha256": "ecaaa9030d276407eb11d332ff96f3db669bf7c8a3086b9d3b6b761f22f172f2"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "host_log": {
+                "bytes": 0,
+                "path": "attention_stage1c.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "pid": 836309,
+              "success": true
+            },
+            "WSE_SURROGATE": {
+              "artifact": "wse_surrogate_stage1c.json",
+              "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 11046,
+                    "path": "run/device-1/device-836321_20260908191605361.log",
+                    "sha256": "afbc9cc16f608b512b41d702f68199268a949244a5bbdf4c4cc7c3b34397d8cb"
+                  },
+                  {
+                    "bytes": 36755,
+                    "path": "run/plog/plog-836321_20260908191601221.log",
+                    "sha256": "007935de189a2faa93adf5542b221a48818c946f1c9b22da240adfaef58206a1"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "host_log": {
+                "bytes": 0,
+                "path": "wse_surrogate_stage1c.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "pid": 836321,
+              "success": true
+            }
+          },
+          "evidence_status": "SIMULATION",
+          "fallback_used": false,
+          "generation": 1,
+          "host_bounce_bytes": 0,
+          "npu_wse_capability_level": "NOT_ESTABLISHED",
+          "observation": {
+            "accepted_tasks": 4,
+            "backend": "cann_acl_vmm_p2p",
+            "case_id": "T12",
+            "close_order": [
+              "STOP_NEW_SUBMISSIONS",
+              "DRAIN_ACCEPTED_REQUESTS",
+              "VALIDATE_CREDITS_RETURNED",
+              "STOP_SERVICE",
+              "RELEASE_PEER_IMPORT",
+              "UNREGISTER_LOCAL_WINDOW",
+              "FREE_LOCAL_MEMORY",
+              "DESTROY_RUNTIME"
+            ],
+            "credits_acquired": 4,
+            "credits_returned": 4,
+            "driver_binary_sha256": "713684ebfc8fada9ba1b7612a3cb4108298137064fa2b27da8971e2e3c9baf35",
+            "driver_report": {
+              "accepted": 4,
+              "checksum_errors": 0,
+              "completions": 4,
+              "credits_acquired": 4,
+              "credits_returned": 4,
+              "drain_completed": 1,
+              "drain_started": 1,
+              "elapsed_cycles": 1225588,
+              "generation_errors": 0,
+              "input_fences": 4,
+              "marker_errors": 0,
+              "max_inflight": 2,
+              "output_fences": 0,
+              "post_stop_attempts": 1,
+              "post_stop_rejections": 1,
+              "processed": 4,
+              "reserved": 0,
+              "sequence_errors": 0,
+              "service_stopped": 1,
+              "stop_new_submissions": 1,
+              "submissions": 4,
+              "terminal_tasks": 4,
+              "timeouts": 0,
+              "validation_errors": 0
+            },
+            "duplicate_close_attempts": 8,
+            "duplicate_close_rejections": 0,
+            "early_window_releases": 0,
+            "fallback_used": false,
+            "generation": 1,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "host_bounce_bytes": 0,
+            "host_hot_path_messages": 0,
+            "host_hot_path_payload_bytes": 0,
+            "idempotent_close_successes": 8,
+            "passed": true,
+            "residual_contexts": 0,
+            "residual_queues": 0,
+            "residual_registrations": 0,
+            "residual_windows": 0,
+            "service_binary_sha256": "0418050432af5ef079df7af6b1e0255e13da85fd31f2db020194cfea07b137ee",
+            "service_report": {
+              "accepted": 4,
+              "checksum_errors": 0,
+              "completions": 4,
+              "credits_acquired": 0,
+              "credits_returned": 0,
+              "drain_completed": 1,
+              "drain_started": 1,
+              "elapsed_cycles": 681886,
+              "generation_errors": 0,
+              "input_fences": 0,
+              "marker_errors": 0,
+              "max_inflight": 2,
+              "output_fences": 4,
+              "post_stop_attempts": 1,
+              "post_stop_rejections": 1,
+              "processed": 4,
+              "reserved": 0,
+              "sequence_errors": 0,
+              "service_stopped": 1,
+              "stop_new_submissions": 1,
+              "submissions": 4,
+              "terminal_tasks": 4,
+              "timeouts": 0,
+              "validation_errors": 0
+            },
+            "terminal_outcomes": 4,
+            "transport_scope": "HOST_LOCAL"
+          },
+          "profile": "NPU_SURROGATE",
+          "resource_cleanup": "VERIFIED",
+          "run_id": "stage1c-8f370364f74e4c1d8fd6683af95ffa14",
+          "schema_version": 1,
+          "stage1c_progress": "T12_PASS",
+          "start_order": "attention-first",
+          "success": true,
+          "transport_scope": "HOST_LOCAL"
+        },
+        "task_id": "task_20260908_191600_83616312940"
+      },
+      {
+        "endpoints": {
+          "ATTENTION": {
+            "case_id": "T12",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 1159,
+              "received_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              },
+              "sent_bytes": 1135,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              }
+            },
+            "device_id": 0,
+            "device_loop": {
+              "binary_sha256": "713684ebfc8fada9ba1b7612a3cb4108298137064fa2b27da8971e2e3c9baf35",
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1c_t12_driver_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "accepted": 4,
+                "checksum_errors": 0,
+                "completions": 4,
+                "credits_acquired": 4,
+                "credits_returned": 4,
+                "drain_completed": 1,
+                "drain_started": 1,
+                "elapsed_cycles": 1421958,
+                "generation_errors": 0,
+                "input_fences": 4,
+                "marker_errors": 0,
+                "max_inflight": 2,
+                "output_fences": 0,
+                "post_stop_attempts": 1,
+                "post_stop_rejections": 1,
+                "processed": 4,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "service_stopped": 1,
+                "stop_new_submissions": 1,
+                "submissions": 4,
+                "terminal_tasks": 4,
+                "timeouts": 0,
+                "validation_errors": 0
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": {
+              "close_order": [
+                "STOP_NEW_SUBMISSIONS",
+                "DRAIN_ACCEPTED_REQUESTS",
+                "VALIDATE_CREDITS_RETURNED",
+                "STOP_SERVICE",
+                "RELEASE_PEER_IMPORT",
+                "UNREGISTER_LOCAL_WINDOW",
+                "FREE_LOCAL_MEMORY",
+                "DESTROY_RUNTIME"
+              ],
+              "duplicate_close_attempts": 4,
+              "duplicate_close_rejections": 0,
+              "idempotent_close_successes": 4
+            },
+            "manifest": {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 0,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1049088,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "01072f2c0b9476dd76eb2b7ae726f41c7db6221bd28d5858ca13558fe635d428"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            "metrics": {
+              "host_cpu_ns": 786010,
+              "host_cpu_utilization_pct": 75.30007079649408,
+              "host_memory_growth_bytes": 4096,
+              "host_wall_ns": 1043837,
+              "initial_rss_bytes": 24326144,
+              "kernel_elapsed_ns": 1556707,
+              "post_kernel_rss_bytes": 139853824,
+              "process_residual_growth_bytes": 74829824,
+              "runtime_setup_growth_bytes": 115523584,
+              "steady_state_rss_bytes": 139849728
+            },
+            "old_peer_handle_probe": null,
+            "role": "ATTENTION",
+            "success": true
+          },
+          "WSE_SURROGATE": {
+            "case_id": "T12",
+            "cleanup": {
+              "device_kernel": "CLOSED",
+              "imported_window": "CLOSED",
+              "owned_window": "CLOSED",
+              "runtime": "CLOSED"
+            },
+            "control": {
+              "received_bytes": 1135,
+              "received_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              },
+              "sent_bytes": 1159,
+              "sent_messages": {
+                "ATTACHED": 1,
+                "DETACHED": 1,
+                "DRAIN": 1,
+                "MANIFEST": 1,
+                "READY": 1,
+                "RELEASED": 1
+              }
+            },
+            "device_id": 1,
+            "device_loop": {
+              "binary_sha256": "0418050432af5ef079df7af6b1e0255e13da85fd31f2db020194cfea07b137ee",
+              "hot_path": {
+                "completion_messages": 0,
+                "control_bytes": 0,
+                "control_messages": 0,
+                "payload_bytes": 0,
+                "task_messages": 0
+              },
+              "kernel": "pypto_stage1c_t12_service_0_mix_aiv",
+              "launches": 1,
+              "report": {
+                "accepted": 4,
+                "checksum_errors": 0,
+                "completions": 4,
+                "credits_acquired": 0,
+                "credits_returned": 0,
+                "drain_completed": 1,
+                "drain_started": 1,
+                "elapsed_cycles": 3726441,
+                "generation_errors": 0,
+                "input_fences": 0,
+                "marker_errors": 0,
+                "max_inflight": 2,
+                "output_fences": 4,
+                "post_stop_attempts": 1,
+                "post_stop_rejections": 1,
+                "processed": 4,
+                "reserved": 0,
+                "sequence_errors": 0,
+                "service_stopped": 1,
+                "stop_new_submissions": 1,
+                "submissions": 4,
+                "terminal_tasks": 4,
+                "timeouts": 0,
+                "validation_errors": 0
+              }
+            },
+            "error": null,
+            "generation": 1,
+            "host_bounce_bytes": 0,
+            "lifecycle": {
+              "close_order": [
+                "STOP_NEW_SUBMISSIONS",
+                "DRAIN_ACCEPTED_REQUESTS",
+                "VALIDATE_CREDITS_RETURNED",
+                "STOP_SERVICE",
+                "RELEASE_PEER_IMPORT",
+                "UNREGISTER_LOCAL_WINDOW",
+                "FREE_LOCAL_MEMORY",
+                "DESTROY_RUNTIME"
+              ],
+              "duplicate_close_attempts": 4,
+              "duplicate_close_rejections": 0,
+              "idempotent_close_successes": 4
+            },
+            "manifest": {
+              "backend": "cann_acl_vmm_p2p",
+              "device_id": 1,
+              "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+              "logical_bytes": 1049088,
+              "mapping_bytes": 2097152,
+              "opaque_handle": {
+                "kind": "ACL_VMM_SHAREABLE_HANDLE",
+                "sha256": "dbb640cd413ca421ecaeea576eadd92d6962837a01feb304a105edaa60b0a49e"
+              },
+              "transport_scope": "HOST_LOCAL"
+            },
+            "metrics": {
+              "host_cpu_ns": 594536,
+              "host_cpu_utilization_pct": 57.008231892951834,
+              "host_memory_growth_bytes": 4096,
+              "host_wall_ns": 1042895,
+              "initial_rss_bytes": 24387584,
+              "kernel_elapsed_ns": 3958011,
+              "post_kernel_rss_bytes": 139788288,
+              "process_residual_growth_bytes": 74797056,
+              "runtime_setup_growth_bytes": 115396608,
+              "steady_state_rss_bytes": 139784192
+            },
+            "old_peer_handle_probe": null,
+            "role": "WSE_SURROGATE",
+            "success": true
+          }
+        },
+        "observation": {
+          "accepted_tasks": 4,
+          "backend": "cann_acl_vmm_p2p",
+          "case_id": "T12",
+          "close_order": [
+            "STOP_NEW_SUBMISSIONS",
+            "DRAIN_ACCEPTED_REQUESTS",
+            "VALIDATE_CREDITS_RETURNED",
+            "STOP_SERVICE",
+            "RELEASE_PEER_IMPORT",
+            "UNREGISTER_LOCAL_WINDOW",
+            "FREE_LOCAL_MEMORY",
+            "DESTROY_RUNTIME"
+          ],
+          "credits_acquired": 4,
+          "credits_returned": 4,
+          "driver_binary_sha256": "713684ebfc8fada9ba1b7612a3cb4108298137064fa2b27da8971e2e3c9baf35",
+          "driver_report": {
+            "accepted": 4,
+            "checksum_errors": 0,
+            "completions": 4,
+            "credits_acquired": 4,
+            "credits_returned": 4,
+            "drain_completed": 1,
+            "drain_started": 1,
+            "elapsed_cycles": 1421958,
+            "generation_errors": 0,
+            "input_fences": 4,
+            "marker_errors": 0,
+            "max_inflight": 2,
+            "output_fences": 0,
+            "post_stop_attempts": 1,
+            "post_stop_rejections": 1,
+            "processed": 4,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "service_stopped": 1,
+            "stop_new_submissions": 1,
+            "submissions": 4,
+            "terminal_tasks": 4,
+            "timeouts": 0,
+            "validation_errors": 0
+          },
+          "duplicate_close_attempts": 8,
+          "duplicate_close_rejections": 0,
+          "early_window_releases": 0,
+          "fallback_used": false,
+          "generation": 1,
+          "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+          "host_bounce_bytes": 0,
+          "host_hot_path_messages": 0,
+          "host_hot_path_payload_bytes": 0,
+          "idempotent_close_successes": 8,
+          "passed": true,
+          "residual_contexts": 0,
+          "residual_queues": 0,
+          "residual_registrations": 0,
+          "residual_windows": 0,
+          "service_binary_sha256": "0418050432af5ef079df7af6b1e0255e13da85fd31f2db020194cfea07b137ee",
+          "service_report": {
+            "accepted": 4,
+            "checksum_errors": 0,
+            "completions": 4,
+            "credits_acquired": 0,
+            "credits_returned": 0,
+            "drain_completed": 1,
+            "drain_started": 1,
+            "elapsed_cycles": 3726441,
+            "generation_errors": 0,
+            "input_fences": 0,
+            "marker_errors": 0,
+            "max_inflight": 2,
+            "output_fences": 4,
+            "post_stop_attempts": 1,
+            "post_stop_rejections": 1,
+            "processed": 4,
+            "reserved": 0,
+            "sequence_errors": 0,
+            "service_stopped": 1,
+            "stop_new_submissions": 1,
+            "submissions": 4,
+            "terminal_tasks": 4,
+            "timeouts": 0,
+            "validation_errors": 0
+          },
+          "terminal_outcomes": 4,
+          "transport_scope": "HOST_LOCAL"
+        },
+        "result": {
+          "actual_backend": "cann_acl_vmm_p2p",
+          "c2_status": "NOT_ESTABLISHED",
+          "capability_level": "C1",
+          "claim_scope": "NPU_SURROGATE_ONLY",
+          "completed_at": "2026-09-08T11:16:37.765987+00:00",
+          "data_results": {
+            "T12": {
+              "attempts": 4,
+              "passed": 4,
+              "status": "PASS"
+            }
+          },
+          "devices": {
+            "ATTENTION": 0,
+            "WSE_SURROGATE": 1
+          },
+          "endpoints": {
+            "ATTENTION": {
+              "artifact": "attention_stage1c.json",
+              "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 11045,
+                    "path": "run/device-0/device-839127_20260908191632862.log",
+                    "sha256": "5162c5c6220c8739457e04bee639a5b59e5f3f3b21c4a197911e7d48423cae98"
+                  },
+                  {
+                    "bytes": 36884,
+                    "path": "run/plog/plog-839127_20260908191628152.log",
+                    "sha256": "417a3bc833d07e47809112ef0ce26dbdffe53bddae4c59349619efafa59b9cfd"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "host_log": {
+                "bytes": 0,
+                "path": "attention_stage1c.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "pid": 839127,
+              "success": true
+            },
+            "WSE_SURROGATE": {
+              "artifact": "wse_surrogate_stage1c.json",
+              "cleanup": {
+                "device_kernel": "CLOSED",
+                "imported_window": "CLOSED",
+                "owned_window": "CLOSED",
+                "runtime": "CLOSED"
+              },
+              "device_logs": {
+                "files": [
+                  {
+                    "bytes": 11046,
+                    "path": "run/device-1/device-839001_20260908191632684.log",
+                    "sha256": "e2d26cc35dd1a8c8e609c39d2e6a86615d9862e9b6b01a94d3563cb1d54c2779"
+                  },
+                  {
+                    "bytes": 36755,
+                    "path": "run/plog/plog-839001_20260908191627901.log",
+                    "sha256": "3849f78e9be404bbd43fa0f75cecdc11a94d5d912925e1fd777a3335144b6c90"
+                  }
+                ],
+                "p2p_enable_observed": true,
+                "p2p_memory_released": true
+              },
+              "exit_code": 0,
+              "host_log": {
+                "bytes": 0,
+                "path": "wse_surrogate_stage1c.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "pid": 839001,
+              "success": true
+            }
+          },
+          "evidence_status": "SIMULATION",
+          "fallback_used": false,
+          "generation": 1,
+          "host_bounce_bytes": 0,
+          "npu_wse_capability_level": "NOT_ESTABLISHED",
+          "observation": {
+            "accepted_tasks": 4,
+            "backend": "cann_acl_vmm_p2p",
+            "case_id": "T12",
+            "close_order": [
+              "STOP_NEW_SUBMISSIONS",
+              "DRAIN_ACCEPTED_REQUESTS",
+              "VALIDATE_CREDITS_RETURNED",
+              "STOP_SERVICE",
+              "RELEASE_PEER_IMPORT",
+              "UNREGISTER_LOCAL_WINDOW",
+              "FREE_LOCAL_MEMORY",
+              "DESTROY_RUNTIME"
+            ],
+            "credits_acquired": 4,
+            "credits_returned": 4,
+            "driver_binary_sha256": "713684ebfc8fada9ba1b7612a3cb4108298137064fa2b27da8971e2e3c9baf35",
+            "driver_report": {
+              "accepted": 4,
+              "checksum_errors": 0,
+              "completions": 4,
+              "credits_acquired": 4,
+              "credits_returned": 4,
+              "drain_completed": 1,
+              "drain_started": 1,
+              "elapsed_cycles": 1421958,
+              "generation_errors": 0,
+              "input_fences": 4,
+              "marker_errors": 0,
+              "max_inflight": 2,
+              "output_fences": 0,
+              "post_stop_attempts": 1,
+              "post_stop_rejections": 1,
+              "processed": 4,
+              "reserved": 0,
+              "sequence_errors": 0,
+              "service_stopped": 1,
+              "stop_new_submissions": 1,
+              "submissions": 4,
+              "terminal_tasks": 4,
+              "timeouts": 0,
+              "validation_errors": 0
+            },
+            "duplicate_close_attempts": 8,
+            "duplicate_close_rejections": 0,
+            "early_window_releases": 0,
+            "fallback_used": false,
+            "generation": 1,
+            "handle_kind": "ACL_VMM_SHAREABLE_HANDLE",
+            "host_bounce_bytes": 0,
+            "host_hot_path_messages": 0,
+            "host_hot_path_payload_bytes": 0,
+            "idempotent_close_successes": 8,
+            "passed": true,
+            "residual_contexts": 0,
+            "residual_queues": 0,
+            "residual_registrations": 0,
+            "residual_windows": 0,
+            "service_binary_sha256": "0418050432af5ef079df7af6b1e0255e13da85fd31f2db020194cfea07b137ee",
+            "service_report": {
+              "accepted": 4,
+              "checksum_errors": 0,
+              "completions": 4,
+              "credits_acquired": 0,
+              "credits_returned": 0,
+              "drain_completed": 1,
+              "drain_started": 1,
+              "elapsed_cycles": 3726441,
+              "generation_errors": 0,
+              "input_fences": 0,
+              "marker_errors": 0,
+              "max_inflight": 2,
+              "output_fences": 4,
+              "post_stop_attempts": 1,
+              "post_stop_rejections": 1,
+              "processed": 4,
+              "reserved": 0,
+              "sequence_errors": 0,
+              "service_stopped": 1,
+              "stop_new_submissions": 1,
+              "submissions": 4,
+              "terminal_tasks": 4,
+              "timeouts": 0,
+              "validation_errors": 0
+            },
+            "terminal_outcomes": 4,
+            "transport_scope": "HOST_LOCAL"
+          },
+          "profile": "NPU_SURROGATE",
+          "resource_cleanup": "VERIFIED",
+          "run_id": "stage1c-56d09a7a9db442b09f1e19d2fcffb0c5",
+          "schema_version": 1,
+          "stage1c_progress": "T12_PASS",
+          "start_order": "wse-first",
+          "success": true,
+          "transport_scope": "HOST_LOCAL"
+        },
+        "task_id": "task_20260908_191627_83882520827"
+      }
+    ]
+  }
+}

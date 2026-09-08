@@ -227,5 +227,5 @@ T08 在通用约束之外，还要求：
 - 拒绝旧流量后 G+1 正常请求必须继续完成，所有 generation、sequence 和数据错误必须为 0；
 - 每端只允许每代一次 kernel launch，共两次，双代全部资源必须关闭。
 
-离线相关单元测试共 156 项通过，覆盖 Stage 0/1A 回归、AIV binary 生命周期、T04～T08
-契约、结果聚合与证据脱敏。下一步按计划实现 T09 超时状态机。
+T09～T12 已在后续阶段 1C 中完成，结果和 C2 边界见
+[pypto-wse-stage1c-record.md](pypto-wse-stage1c-record.md)。
