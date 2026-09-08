@@ -22,9 +22,12 @@ from tools.pypto_wse_validation.stage1b_contracts import (
     T05_SEQUENCE_COUNT,
     T06_CASE_ID,
     T06_SEQUENCE_COUNT,
+    T07_CASE_ID,
+    T07_SEQUENCE_COUNT,
     T04Observation,
     T05Observation,
     T06Observation,
+    T07Observation,
 )
 
 SCHEMA_VERSION = 1
@@ -80,9 +83,12 @@ def _validate_success(result: Mapping[str, Any], endpoints: Mapping[str, Mapping
     elif case_id == T05_CASE_ID:
         observation_type = T05Observation
         sequence_count = T05_SEQUENCE_COUNT
-    else:
+    elif case_id == T06_CASE_ID:
         observation_type = T06Observation
         sequence_count = T06_SEQUENCE_COUNT
+    else:
+        observation_type = T07Observation
+        sequence_count = T07_SEQUENCE_COUNT
     if not isinstance(observation_raw, dict) or not observation_type.from_dict(observation_raw).passed:
         raise ValueError(f"successful run is missing valid {case_id} device-loop evidence")
     case_result = result.get("data_results", {}).get(case_id, {})
@@ -128,7 +134,7 @@ def collect_stage1b(
     case_id: str = T04_CASE_ID,
     collected_at: str | None = None,
 ) -> dict[str, Any]:
-    if case_id not in (T04_CASE_ID, T05_CASE_ID, T06_CASE_ID):
+    if case_id not in (T04_CASE_ID, T05_CASE_ID, T06_CASE_ID, T07_CASE_ID):
         raise ValueError(f"unsupported Stage 1B case: {case_id}")
     if len(successful_runs) < 2:
         raise ValueError("at least two successful Stage 1B runs are required")
@@ -146,8 +152,10 @@ def collect_stage1b(
         conclusion.update({"t04": "PASS", "t05_t12": "NOT_RUN"})
     elif case_id == T05_CASE_ID:
         conclusion.update({"t05": "PASS", "t06_t12": "NOT_RUN", "validated_case": case_id})
-    else:
+    elif case_id == T06_CASE_ID:
         conclusion.update({"t06": "PASS", "t07_t12": "NOT_RUN", "validated_case": case_id})
+    else:
+        conclusion.update({"t07": "PASS", "t08_t12": "NOT_RUN", "validated_case": case_id})
     return {
         "collected_at": collected_at or datetime.now(UTC).isoformat(),
         "conclusion": conclusion,
@@ -178,7 +186,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--successful-run", action="append", type=_parse_run, required=True)
     parser.add_argument("--implementation-revision", required=True)
-    parser.add_argument("--case-id", choices=(T04_CASE_ID, T05_CASE_ID, T06_CASE_ID), default=T04_CASE_ID)
+    parser.add_argument(
+        "--case-id",
+        choices=(T04_CASE_ID, T05_CASE_ID, T06_CASE_ID, T07_CASE_ID),
+        default=T04_CASE_ID,
+    )
     parser.add_argument("--collected-at")
     parser.add_argument("--output", type=Path, required=True)
     return parser
