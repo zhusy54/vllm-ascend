@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Run stage-1A T01/T02 over host-local ACL VMM P2P."""
+"""Run stage-1A T01/T02/T03 over host-local ACL VMM P2P."""
 
 from __future__ import annotations
 
@@ -24,24 +24,29 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from tools.pypto_wse_validation.acl_vmm import AclVmmRuntime, VmmExport
+from tools.pypto_wse_validation.acl_vmm import AclnnXorTransform, AclVmmRuntime, VmmExport
 from tools.pypto_wse_validation.bootstrap import BootstrapError, ControlChannel
 from tools.pypto_wse_validation.collect_stage0 import parse_device_list
 from tools.pypto_wse_validation.contracts import PROTOCOL_VERSION, EndpointRole, TransportScope
 from tools.pypto_wse_validation.stage1a_contracts import (
     BASE_PAYLOAD_SIZES,
+    ROUND_TRIP_CASE_ID,
+    ROUND_TRIP_TRANSFORM_API,
     STAGE1A_BACKEND,
     STAGE1A_FENCE_API,
     STAGE1A_HANDLE_KIND,
     STAGE1A_TRANSFER_API,
     VALIDATION_P2P_CHUNK_BYTES,
     MemoryKind,
+    RoundTripObservation,
     TransferDirection,
     TransferObservation,
     deterministic_payload,
     opaque_handle_evidence,
     payload_checksum,
     stage1a_matrix_complete,
+    stage1a_round_trip_complete,
+    transform_payload,
 )
 
 SCHEMA_VERSION = 1
@@ -60,6 +65,9 @@ ALLOWED_MESSAGE_TYPES = frozenset(
         "DRAIN",
         "DETACHED",
         "RELEASED",
+        "ROUND_TRIP_FORWARD",
+        "ROUND_TRIP_RETURN",
+        "ROUND_TRIP_VERIFIED",
     }
 )
 FORBIDDEN_DATA_KEYS = frozenset({"payload", "tensor", "output", "host_buffer"})
@@ -342,6 +350,149 @@ def execute_transfer_matrix(
     return tuple(observations)
 
 
+def execute_round_trip_matrix(
+    protocol: _Protocol,
+    *,
+    runtime: Any,
+    local_window: Any,
+    peer_window: Any,
+    transform: Any | None,
+    observation_sink: list[RoundTripObservation] | None = None,
+) -> tuple[RoundTripObservation, ...]:
+    """Execute T03 with a device-side transform and no Host intermediate payload."""
+    observations = observation_sink if observation_sink is not None else []
+    for index, size in enumerate(BASE_PAYLOAD_SIZES, start=1):
+        sequence_id = len(TransferDirection) * len(BASE_PAYLOAD_SIZES) + index
+        payload = deterministic_payload(protocol.run_id, protocol.generation, sequence_id, size)
+        expected_output = transform_payload(payload, sequence_id)
+        input_checksum = payload_checksum(payload)
+        expected_output_checksum = payload_checksum(expected_output)
+        expected_chunks = (size + VALIDATION_P2P_CHUNK_BYTES - 1) // VALIDATION_P2P_CHUNK_BYTES
+        if protocol.role is EndpointRole.ATTENTION:
+            runtime.copy_host_to_device(local_window.address, payload)
+            round_trip_started_ns = time.perf_counter_ns()
+            forward_started_ns = time.perf_counter_ns()
+            forward_chunks = runtime.copy_device_to_device(peer_window.address, local_window.address, size)
+            forward_elapsed_ns = time.perf_counter_ns() - forward_started_ns
+            protocol.send(
+                "ROUND_TRIP_FORWARD",
+                {
+                    "case_id": ROUND_TRIP_CASE_ID,
+                    "forward_elapsed_ns": forward_elapsed_ns,
+                    "forward_transfer_chunks": forward_chunks,
+                    "input_checksum": input_checksum,
+                    "payload_bytes": size,
+                    "sequence_id": sequence_id,
+                    "transform_value": sequence_id & 0xFF,
+                },
+            )
+            returned = protocol.receive("ROUND_TRIP_RETURN")
+            expected_fields = {
+                "case_id": ROUND_TRIP_CASE_ID,
+                "payload_bytes": size,
+                "sequence_id": sequence_id,
+                "transform_api": ROUND_TRIP_TRANSFORM_API,
+                "transform_value": sequence_id & 0xFF,
+                "return_transfer_chunks": expected_chunks,
+            }
+            if any(returned.get(key) != value for key, value in expected_fields.items()):
+                raise Stage1AError("round-trip return metadata mismatch")
+            observed_output = runtime.copy_device_to_host(local_window.address, size)
+            observed_output_checksum = payload_checksum(observed_output)
+            round_trip_elapsed_ns = time.perf_counter_ns() - round_trip_started_ns
+            observation = RoundTripObservation(
+                case_id=ROUND_TRIP_CASE_ID,
+                payload_bytes=size,
+                sequence_id=sequence_id,
+                source_memory=MemoryKind.DEVICE,
+                transform_memory=MemoryKind.DEVICE,
+                destination_memory=MemoryKind.DEVICE,
+                backend=STAGE1A_BACKEND,
+                transport_scope=TransportScope.HOST_LOCAL,
+                handle_kind=STAGE1A_HANDLE_KIND,
+                transfer_api=STAGE1A_TRANSFER_API,
+                visibility_fence=STAGE1A_FENCE_API,
+                transform_api=str(returned["transform_api"]),
+                transform_value=sequence_id & 0xFF,
+                input_checksum=input_checksum,
+                expected_output_checksum=expected_output_checksum,
+                observed_output_checksum=observed_output_checksum,
+                host_bounce_bytes=0,
+                host_intermediate_payload_bytes=0,
+                host_source_staging_bytes=size,
+                host_final_verification_bytes=size,
+                fallback_used=False,
+                transform_device_side=True,
+                forward_transfer_chunks=forward_chunks,
+                return_transfer_chunks=int(returned["return_transfer_chunks"]),
+                max_transfer_chunk_bytes=min(size, VALIDATION_P2P_CHUNK_BYTES),
+                forward_elapsed_ns=forward_elapsed_ns,
+                transform_elapsed_ns=int(returned["transform_elapsed_ns"]),
+                return_elapsed_ns=int(returned["return_elapsed_ns"]),
+                round_trip_elapsed_ns=round_trip_elapsed_ns,
+                transform_workspace_bytes=int(returned["transform_workspace_bytes"]),
+            )
+            observations.append(observation)
+            protocol.send(
+                "ROUND_TRIP_VERIFIED",
+                {
+                    "case_id": ROUND_TRIP_CASE_ID,
+                    "destination_verified": observed_output == expected_output,
+                    "observed_output_checksum": observed_output_checksum,
+                    "payload_bytes": size,
+                    "sequence_id": sequence_id,
+                },
+            )
+            if not observation.passed or observed_output != expected_output:
+                raise Stage1AError(
+                    f"T03 failed for {size} bytes: expected_sha256={expected_output_checksum[:12]}, "
+                    f"observed_sha256={observed_output_checksum[:12]}"
+                )
+        else:
+            forwarded = protocol.receive("ROUND_TRIP_FORWARD")
+            expected_fields = {
+                "case_id": ROUND_TRIP_CASE_ID,
+                "forward_transfer_chunks": expected_chunks,
+                "input_checksum": input_checksum,
+                "payload_bytes": size,
+                "sequence_id": sequence_id,
+                "transform_value": sequence_id & 0xFF,
+            }
+            if any(forwarded.get(key) != value for key, value in expected_fields.items()):
+                raise Stage1AError("round-trip forward metadata mismatch")
+            if transform is None:
+                raise Stage1AError("WSE surrogate requires a device transform")
+            transform_evidence = transform.apply(local_window.address, size, sequence_id & 0xFF)
+            return_started_ns = time.perf_counter_ns()
+            return_chunks = runtime.copy_device_to_device(peer_window.address, local_window.address, size)
+            return_elapsed_ns = time.perf_counter_ns() - return_started_ns
+            protocol.send(
+                "ROUND_TRIP_RETURN",
+                {
+                    "case_id": ROUND_TRIP_CASE_ID,
+                    "payload_bytes": size,
+                    "return_elapsed_ns": return_elapsed_ns,
+                    "return_transfer_chunks": return_chunks,
+                    "sequence_id": sequence_id,
+                    "transform_api": transform_evidence.api,
+                    "transform_elapsed_ns": transform_evidence.elapsed_ns,
+                    "transform_value": sequence_id & 0xFF,
+                    "transform_workspace_bytes": transform_evidence.workspace_bytes,
+                },
+            )
+            verified = protocol.receive("ROUND_TRIP_VERIFIED")
+            expected_verification = {
+                "case_id": ROUND_TRIP_CASE_ID,
+                "destination_verified": True,
+                "observed_output_checksum": expected_output_checksum,
+                "payload_bytes": size,
+                "sequence_id": sequence_id,
+            }
+            if any(verified.get(key) != value for key, value in expected_verification.items()):
+                raise Stage1AError("round-trip verification failed")
+    return tuple(observations)
+
+
 def _connect(host: str, port: int, deadline: float) -> socket.socket:
     last_error: OSError | None = None
     while time.monotonic() < deadline:
@@ -375,6 +526,7 @@ def run_endpoint(args: argparse.Namespace) -> int:
     peer_window: Any | None = None
     channel: ControlChannel | None = None
     observations: list[TransferObservation] = []
+    round_trips: list[RoundTripObservation] = []
     sanitized_manifest: dict[str, Any] | None = None
     cleanup: dict[str, str] = {
         "imported_window": "NOT_CREATED",
@@ -410,13 +562,22 @@ def run_endpoint(args: argparse.Namespace) -> int:
             peer_window = runtime.import_window(peer_export, peer_device_id=peer_device_id)
             cleanup["imported_window"] = "OPEN"
             protocol.exchange("ATTACHED", {"peer_mapping_bytes": peer_window.mapping_bytes})
-            protocol.exchange("READY", {"probe": "T01_T02"})
+            protocol.exchange("READY", {"probe": "T01_T02_T03"})
             execute_transfer_matrix(
                 protocol,
                 runtime=runtime,
                 local_window=local_window,
                 peer_window=peer_window,
                 observation_sink=observations,
+            )
+            transform = AclnnXorTransform(runtime) if role is EndpointRole.WSE_SURROGATE else None
+            execute_round_trip_matrix(
+                protocol,
+                runtime=runtime,
+                local_window=local_window,
+                peer_window=peer_window,
+                transform=transform,
+                observation_sink=round_trips,
             )
             protocol.exchange("DRAIN", {"inflight": 0})
             peer_window.close()
@@ -460,6 +621,7 @@ def run_endpoint(args: argparse.Namespace) -> int:
             "host_bounce_bytes": 0,
             "manifest": sanitized_manifest,
             "observations": [item.to_dict() for item in observations],
+            "round_trips": [item.to_dict() for item in round_trips],
             "pid": os.getpid(),
             "role": role.value,
             "run_id": args.run_id,
@@ -569,6 +731,7 @@ def _device_log_evidence(root: Path) -> dict[str, Any]:
 def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole, subprocess.Popen[Any]]):
     endpoints: dict[str, Any] = {}
     observations: list[TransferObservation] = []
+    round_trips: list[RoundTripObservation] = []
     message_counts: Counter[str] = Counter()
     control_bytes = 0
     all_success = True
@@ -605,8 +768,14 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
             message_counts[message_type] += int(count)
         for raw in artifact.get("observations", []):
             observations.append(TransferObservation.from_dict(raw))
+        for raw in artifact.get("round_trips", []):
+            round_trips.append(RoundTripObservation.from_dict(raw))
     matrix_complete = (
-        all_success and all_cleanup and all(driver_proofs) and stage1a_matrix_complete(tuple(observations))
+        all_success
+        and all_cleanup
+        and all(driver_proofs)
+        and stage1a_matrix_complete(tuple(observations))
+        and stage1a_round_trip_complete(tuple(round_trips))
     )
     direction_results: dict[str, Any] = {}
     for direction in TransferDirection:
@@ -619,6 +788,17 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
             if len(selected) == len(BASE_PAYLOAD_SIZES) and all(item.passed for item in selected)
             else "FAIL",
         }
+    direction_results[ROUND_TRIP_CASE_ID] = {
+        "attempts": len(round_trips),
+        "bytes": sum(item.payload_bytes for item in round_trips),
+        "passed": sum(item.passed for item in round_trips),
+        "status": (
+            "PASS"
+            if len(round_trips) == len(BASE_PAYLOAD_SIZES) and all(item.passed for item in round_trips)
+            else "FAIL"
+        ),
+        "wire_bytes": 2 * sum(item.payload_bytes for item in round_trips),
+    }
     return {
         "actual_backend": STAGE1A_BACKEND,
         "capability_level": "C1" if matrix_complete else "NONE",
@@ -636,8 +816,12 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
         "fallback_used": False,
         "generation": args.generation,
         "host_bounce_bytes": 0,
-        "host_source_staging_bytes": sum(item.host_source_staging_bytes for item in observations),
-        "host_verification_bytes": sum(item.host_verification_bytes for item in observations),
+        "host_final_verification_bytes": sum(item.host_final_verification_bytes for item in round_trips),
+        "host_intermediate_payload_bytes": sum(item.host_intermediate_payload_bytes for item in round_trips),
+        "host_source_staging_bytes": sum(item.host_source_staging_bytes for item in observations)
+        + sum(item.host_source_staging_bytes for item in round_trips),
+        "host_verification_bytes": sum(item.host_verification_bytes for item in observations)
+        + sum(item.host_final_verification_bytes for item in round_trips),
         "npu_wse_capability_level": "NOT_ESTABLISHED",
         "profile": "NPU_SURROGATE",
         "resource_cleanup": "VERIFIED" if all_cleanup else "FAILED",
@@ -652,6 +836,7 @@ def _aggregate_result(args: argparse.Namespace, processes: Mapping[EndpointRole,
                 "aclrtDeviceEnablePeerAccess returned success",
                 "ACL VMM shareable handle exported and imported",
                 "aclrtMemcpy used ACL_MEMCPY_DEVICE_TO_DEVICE",
+                f"{ROUND_TRIP_TRANSFORM_API} transformed WSE-surrogate Device Memory in place",
                 "driver logs contain Enable P2P and released P2P_HBM counters",
             ]
             if matrix_complete
