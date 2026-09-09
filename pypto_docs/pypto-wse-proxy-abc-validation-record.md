@@ -57,8 +57,8 @@
 
 ```bash
 bash pypto_test/build_kernels.sh
-.venv/bin/python -m pytest -q pypto_test/tests
-.venv/bin/python -m pypto_test.validation.collect_evidence \
+../.venv/bin/python -m pytest -q pypto_test/tests
+../.venv/bin/python -m pypto_test.validation.collect_evidence \
   --attention-device 0 --wse-device 1 \
   --artifact-dir pypto_test/artifacts/full
 ```

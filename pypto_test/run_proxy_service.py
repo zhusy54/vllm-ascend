@@ -18,6 +18,8 @@ resident B kernel observes those directly in Device memory.
 
 from __future__ import annotations
 
+import argparse
+import json
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -35,6 +37,7 @@ from pypto_test.bootstrap import (
 )
 from pypto_test.contracts import EndpointRole, ExecutionResult
 from pypto_test.service import PseudoPyptoDistributedService
+from pypto_test.validation.validation_utils import get_input_payload, return_result
 
 
 def _wse_host_process(
@@ -222,3 +225,44 @@ def run_proxy_service(
             "wse": wse_evidence,
             "teardown": drain,
         }
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--attention-device", type=int, required=True)
+    parser.add_argument("--wse-device", type=int, required=True)
+    parser.add_argument("--generation", type=int, default=1)
+    parser.add_argument("--elements", type=int, nargs="*", default=[1024])
+    parser.add_argument("--start-order", choices=("attention-first", "wse-first"), default="attention-first")
+    parser.add_argument("--kernel-dir", type=Path, default=Path(__file__).parent / "build")
+    parser.add_argument("--output", type=Path)
+    return parser.parse_args()
+
+
+def main() -> int:
+    """Run one proxy-service instance without invoking the validation matrix."""
+
+    args = _parse_args()
+    input_payloads = [
+        get_input_payload(generation=args.generation, request_id=request_id, element_count=element_count)
+        for request_id, element_count in enumerate(args.elements, start=1)
+    ]
+    result = run_proxy_service(
+        attention_device=args.attention_device,
+        wse_device=args.wse_device,
+        generation=args.generation,
+        input_payloads=input_payloads,
+        start_order=args.start_order,
+        kernel_dir=args.kernel_dir,
+        result_handler=return_result,
+    )
+    encoded = json.dumps(result, indent=2, sort_keys=True)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(encoded + "\n")
+    print(encoded)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

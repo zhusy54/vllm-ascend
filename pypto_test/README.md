@@ -14,12 +14,12 @@ Build the two resident kernels:
 bash pypto_test/build_kernels.sh
 ```
 
-Run one request with two same-host NPU devices:
+Run one proxy-service instance directly with two same-host NPU devices:
 
 ```bash
-.venv/bin/python -m pypto_test.validation.collect_evidence \
+../.venv/bin/python -m pypto_test.run_proxy_service \
   --attention-device 0 --wse-device 1 \
-  --case V02 --start-order attention-first
+  --elements 1024 --start-order attention-first
 ```
 
 The Host only writes the request input and submission control, then polls and
@@ -29,7 +29,7 @@ the two resident device kernels.
 Run the complete V01-V06 matrix and create detailed gitignored artifacts:
 
 ```bash
-.venv/bin/python -m pypto_test.validation.collect_evidence \
+../.venv/bin/python -m pypto_test.validation.collect_evidence \
   --attention-device 0 --wse-device 1 \
   --artifact-dir pypto_test/artifacts/full
 ```

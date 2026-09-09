@@ -11,9 +11,11 @@ or missing B execution cannot accidentally be summarized as PASS.
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
+import pypto_test.run_proxy_service as proxy_entry
 from pypto_test.contracts import ExecutionResult, checksum_u32
 from pypto_test.validation.collect_evidence import EvidenceError, validate_generation
 from pypto_test.validation.validation_utils import expected_abc, get_input_payload, return_result
@@ -66,6 +68,36 @@ def test_return_result_validates_and_prints_final_output(capsys):
     output = expected_abc(payload)
     result = ExecutionResult(1, 1, 1, 4, output, checksum_u32(output), 1, 128, len(output))
     return_result(payload, result)
+    assert '"status": "PASS"' in capsys.readouterr().out
+
+
+def test_run_proxy_service_module_has_direct_cli(monkeypatch, tmp_path, capsys):
+    output = tmp_path / "result.json"
+    captured = {}
+
+    def fake_run_proxy_service(**kwargs):
+        captured.update(kwargs)
+        return {"status": "PASS"}
+
+    monkeypatch.setattr(proxy_entry, "run_proxy_service", fake_run_proxy_service)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "run_proxy_service",
+            "--attention-device",
+            "0",
+            "--wse-device",
+            "1",
+            "--elements",
+            "16",
+            "--output",
+            str(output),
+        ],
+    )
+    assert proxy_entry.main() == 0
+    assert len(captured["input_payloads"]) == 1
+    assert captured["kernel_dir"] == Path(proxy_entry.__file__).parent / "build"
+    assert '"status": "PASS"' in output.read_text()
     assert '"status": "PASS"' in capsys.readouterr().out
 
 
