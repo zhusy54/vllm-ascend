@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from pypto_test.contracts import (
+from pypto_test.pseudo_pypto.contracts import (
     DEFAULT_LAYOUT,
     NPU_FINAL_OUTPUT_OFFSET,
     NPU_HOST_REQUEST_DESC_OFFSET,
@@ -37,7 +37,7 @@ from pypto_test.contracts import (
     SignalLine,
     checksum_u32,
 )
-from pypto_test.service import PseudoPyptoDistributedService
+from pypto_test.pseudo_pypto.service import PseudoPyptoDistributedService
 from pypto_test.validation.validation_utils import expected_abc, get_input_payload
 
 

@@ -39,7 +39,7 @@ common_flags=(
 
 for kernel in abc_driver b_service; do
     "$ccec" "${common_flags[@]}" \
-        -o "$output_dir/${kernel}_vec.o" "$script_dir/kernels/${kernel}.cpp"
+        -o "$output_dir/${kernel}_vec.o" "$script_dir/pseudo_pypto/kernels/${kernel}.cpp"
     "$linker" -m aicorelinux -Ttext=0 -static --allow-multiple-definition \
         -o "$output_dir/${kernel}.o" "$output_dir/${kernel}_vec.o"
 done

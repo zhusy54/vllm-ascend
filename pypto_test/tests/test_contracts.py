@@ -9,7 +9,7 @@ from dataclasses import replace
 
 import pytest
 
-from pypto_test.contracts import (
+from pypto_test.pseudo_pypto.contracts import (
     ABC_TASKS,
     CACHE_LINE_BYTES,
     DEFAULT_LAYOUT,

@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
 
-from pypto_test.contracts import (
+from pypto_test.pseudo_pypto.contracts import (
     DEFAULT_LAYOUT,
     EXPECTED_LAYOUT_HASH,
     NPU_WINDOW_BYTES,

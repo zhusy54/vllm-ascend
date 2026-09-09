@@ -26,8 +26,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from pypto_test.backend import WseBackend
-from pypto_test.bootstrap import (
+from pypto_test.infrastructure.bootstrap import (
     BootstrapManager,
     ProxyControlChannel,
     WseDeviceMemoryManager,
@@ -35,8 +34,9 @@ from pypto_test.bootstrap import (
     connect_control_endpoint,
     open_control_listener,
 )
-from pypto_test.contracts import EndpointRole, ExecutionResult
-from pypto_test.service import PseudoPyptoDistributedService
+from pypto_test.pseudo_pypto.backend import WseBackend
+from pypto_test.pseudo_pypto.contracts import EndpointRole, ExecutionResult
+from pypto_test.pseudo_pypto.service import PseudoPyptoDistributedService
 from pypto_test.validation.validation_utils import get_input_payload, return_result
 
 

@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any, Protocol
 
-from pypto_test.contracts import (
+from pypto_test.pseudo_pypto.contracts import (
     CACHE_LINE_BYTES,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_TIMEOUT_SECONDS,

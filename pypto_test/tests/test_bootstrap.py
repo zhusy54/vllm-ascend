@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from pypto_test.bootstrap import (
+from pypto_test.infrastructure.bootstrap import (
     BootstrapError,
     BootstrapManager,
     BorrowedDeviceExecutionPort,
@@ -23,7 +23,7 @@ from pypto_test.bootstrap import (
     ProxyControlChannel,
     WindowManifest,
 )
-from pypto_test.contracts import WSE_WINDOW_BYTES, EndpointRole
+from pypto_test.pseudo_pypto.contracts import WSE_WINDOW_BYTES, EndpointRole
 from tools.pypto_wse_validation.acl_vmm import VmmExport
 
 
@@ -169,7 +169,7 @@ def test_bootstrap_keeps_host_initialization_separate_from_communication(monkeyp
     )
     manager.channel = FakeControlChannel(peer_manifest)
     manager._process_controller = object()
-    monkeypatch.setattr("pypto_test.bootstrap.NpuDeviceMemoryManager", lambda **kwargs: local_manager)
+    monkeypatch.setattr("pypto_test.infrastructure.bootstrap.NpuDeviceMemoryManager", lambda **kwargs: local_manager)
 
     manager.launch_npu_host()
     assert runtime.initialized

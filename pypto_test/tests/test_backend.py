@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pypto_test.backend import WseBackend
-from pypto_test.contracts import (
+from pypto_test.pseudo_pypto.backend import WseBackend
+from pypto_test.pseudo_pypto.contracts import (
     CACHE_LINE_BYTES,
     WSE_LIFECYCLE_OFFSET,
     BorrowedWindowView,
