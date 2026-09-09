@@ -25,6 +25,7 @@ from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
 PROTOCOL_VERSION = 1
+DEVICE_COMMUNICATION_ABI_VERSION = 1
 CACHE_LINE_BYTES = 64
 UINT32_BYTES = 4
 MAX_PAYLOAD_BYTES = 1024 * 1024
@@ -215,6 +216,65 @@ class WseCommunicationBinding:
             self.peer_shared_base,
             self.peer_shared_bytes,
             NPU_SHARED_WINDOW_BYTES,
+        )
+
+
+@dataclass(frozen=True)
+class NpuDeviceCommunication:
+    """Resolved NPU-kernel addresses for the fixed remote-store ABI.
+
+    The resident NPU kernel publishes A output in this order:
+    remote B input -> remote submission descriptor -> fence -> remote signal.
+    It consumes the WSE response as completion signal -> fence -> descriptor
+    and B output.  Host code does not execute any of those operations.
+    """
+
+    local_b_output: int
+    local_completion_signal: int
+    local_completion_descriptor: int
+    remote_b_input: int
+    remote_submission_signal: int
+    remote_submission_descriptor: int
+
+    @classmethod
+    def from_binding(cls, binding: NpuCommunicationBinding) -> NpuDeviceCommunication:
+        binding.validate()
+        return cls(
+            binding.local_shared_base + NPU_SHARED_B_OUTPUT_OFFSET,
+            binding.local_shared_base + NPU_SHARED_B_COMPLETION_SIGNAL_OFFSET,
+            binding.local_shared_base + NPU_SHARED_B_COMPLETION_DESC_OFFSET,
+            binding.peer_shared_base + WSE_SHARED_B_INPUT_OFFSET,
+            binding.peer_shared_base + WSE_SHARED_B_SUBMISSION_SIGNAL_OFFSET,
+            binding.peer_shared_base + WSE_SHARED_B_SUBMISSION_DESC_OFFSET,
+        )
+
+
+@dataclass(frozen=True)
+class WseDeviceCommunication:
+    """Resolved WSE-kernel addresses for the fixed remote-store ABI.
+
+    B consumes submission signal -> fence -> descriptor and A output.  It then
+    publishes remote B output -> remote completion descriptor -> fence ->
+    remote completion signal.  This is the PyPTO Device execution boundary.
+    """
+
+    local_b_input: int
+    local_submission_signal: int
+    local_submission_descriptor: int
+    remote_b_output: int
+    remote_completion_signal: int
+    remote_completion_descriptor: int
+
+    @classmethod
+    def from_binding(cls, binding: WseCommunicationBinding) -> WseDeviceCommunication:
+        binding.validate()
+        return cls(
+            binding.local_shared_base + WSE_SHARED_B_INPUT_OFFSET,
+            binding.local_shared_base + WSE_SHARED_B_SUBMISSION_SIGNAL_OFFSET,
+            binding.local_shared_base + WSE_SHARED_B_SUBMISSION_DESC_OFFSET,
+            binding.peer_shared_base + NPU_SHARED_B_OUTPUT_OFFSET,
+            binding.peer_shared_base + NPU_SHARED_B_COMPLETION_SIGNAL_OFFSET,
+            binding.peer_shared_base + NPU_SHARED_B_COMPLETION_DESC_OFFSET,
         )
 
 

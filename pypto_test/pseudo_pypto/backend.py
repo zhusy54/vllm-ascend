@@ -32,25 +32,21 @@ from pypto_test.pseudo_pypto.communication import (
     NPU_LOCAL_LIFECYCLE_OFFSET,
     NPU_LOCAL_REPORT_OFFSET,
     NPU_LOCAL_WINDOW_BYTES,
-    NPU_SHARED_B_COMPLETION_DESC_OFFSET,
-    NPU_SHARED_B_COMPLETION_SIGNAL_OFFSET,
-    NPU_SHARED_B_OUTPUT_OFFSET,
     WSE_LOCAL_LIFECYCLE_OFFSET,
     WSE_LOCAL_REPORT_OFFSET,
     WSE_LOCAL_WINDOW_BYTES,
-    WSE_SHARED_B_INPUT_OFFSET,
-    WSE_SHARED_B_SUBMISSION_DESC_OFFSET,
-    WSE_SHARED_B_SUBMISSION_SIGNAL_OFFSET,
     CompletionDescriptor,
     DriverReport,
     ExecutionResult,
     HostRequestDescriptor,
     LifecycleLine,
     NpuCommunicationBinding,
+    NpuDeviceCommunication,
     ServiceError,
     ServiceReport,
     SignalLine,
     WseCommunicationBinding,
+    WseDeviceCommunication,
     checksum_u32,
 )
 
@@ -444,28 +440,29 @@ class NpuExecutionBackend:
         local = self._runtime.allocate_local(NPU_LOCAL_WINDOW_BYTES)
         self._local = local
         self._io = NpuHostIo(self._runtime, local.address)
+        communication = NpuDeviceCommunication.from_binding(self.binding)
         self._runtime.copy_host_to_device(local.address + NPU_LOCAL_CONTROL_OFFSET, bytes(8 * CACHE_LINE_BYTES))
         self._runtime.copy_host_to_device(
-            self.binding.local_shared_base + NPU_SHARED_B_COMPLETION_SIGNAL_OFFSET,
+            communication.local_completion_signal,
             bytes(3 * CACHE_LINE_BYTES),
         )
         self._kernel = self._runtime.launch_kernel(
             self._kernel_binary,
             DriverKernelArguments(
                 local.address + NPU_LOCAL_INPUT_OFFSET,
-                self.binding.local_shared_base + NPU_SHARED_B_OUTPUT_OFFSET,
+                communication.local_b_output,
                 local.address + NPU_LOCAL_FINAL_OUTPUT_OFFSET,
                 local.address + NPU_LOCAL_HOST_REQUEST_SIGNAL_OFFSET,
                 local.address + NPU_LOCAL_HOST_REQUEST_DESC_OFFSET,
                 local.address + NPU_LOCAL_HOST_RESULT_SIGNAL_OFFSET,
                 local.address + NPU_LOCAL_HOST_RESULT_DESC_OFFSET,
-                self.binding.local_shared_base + NPU_SHARED_B_COMPLETION_SIGNAL_OFFSET,
-                self.binding.local_shared_base + NPU_SHARED_B_COMPLETION_DESC_OFFSET,
+                communication.local_completion_signal,
+                communication.local_completion_descriptor,
                 local.address + NPU_LOCAL_LIFECYCLE_OFFSET,
                 local.address + NPU_LOCAL_REPORT_OFFSET,
-                self.binding.peer_shared_base + WSE_SHARED_B_INPUT_OFFSET,
-                self.binding.peer_shared_base + WSE_SHARED_B_SUBMISSION_SIGNAL_OFFSET,
-                self.binding.peer_shared_base + WSE_SHARED_B_SUBMISSION_DESC_OFFSET,
+                communication.remote_b_input,
+                communication.remote_submission_signal,
+                communication.remote_submission_descriptor,
                 self.binding.generation,
                 MAX_ELEMENTS,
             ),
@@ -635,22 +632,23 @@ class WseBackend:
             raise BackendError("WSE backend is already initialized")
         local = self._runtime.allocate_local(WSE_LOCAL_WINDOW_BYTES)
         self._local = local
+        communication = WseDeviceCommunication.from_binding(self.binding)
         self._runtime.copy_host_to_device(local.address, bytes(WSE_LOCAL_WINDOW_BYTES))
         self._runtime.copy_host_to_device(
-            self.binding.local_shared_base + WSE_SHARED_B_SUBMISSION_SIGNAL_OFFSET,
+            communication.local_submission_signal,
             bytes(3 * CACHE_LINE_BYTES),
         )
         self._kernel = self._runtime.launch_kernel(
             self._kernel_binary,
             BServiceKernelArguments(
-                self.binding.local_shared_base + WSE_SHARED_B_INPUT_OFFSET,
-                self.binding.local_shared_base + WSE_SHARED_B_SUBMISSION_SIGNAL_OFFSET,
-                self.binding.local_shared_base + WSE_SHARED_B_SUBMISSION_DESC_OFFSET,
+                communication.local_b_input,
+                communication.local_submission_signal,
+                communication.local_submission_descriptor,
                 local.address + WSE_LOCAL_LIFECYCLE_OFFSET,
                 local.address + WSE_LOCAL_REPORT_OFFSET,
-                self.binding.peer_shared_base + NPU_SHARED_B_OUTPUT_OFFSET,
-                self.binding.peer_shared_base + NPU_SHARED_B_COMPLETION_SIGNAL_OFFSET,
-                self.binding.peer_shared_base + NPU_SHARED_B_COMPLETION_DESC_OFFSET,
+                communication.remote_b_output,
+                communication.remote_completion_signal,
+                communication.remote_completion_descriptor,
                 self.binding.generation,
                 MAX_ELEMENTS,
             ),
