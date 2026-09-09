@@ -384,7 +384,9 @@ class LifecycleLine:
     @classmethod
     def from_bytes(cls, payload: bytes) -> LifecycleLine:
         values = _unpack_line(payload)
-        return cls(*values[:3])
+        lifecycle = cls(*values[:3])
+        lifecycle.to_bytes()
+        return lifecycle
 
 
 @dataclass(frozen=True)
