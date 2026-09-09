@@ -25,3 +25,14 @@ Run one generation with two same-host NPU devices:
 The Host only writes the request input and submission control, then polls and
 reads the final result. A, remote B dispatch/completion, and C are advanced by
 the two resident device kernels.
+
+Run the complete V01-V06 matrix and create detailed gitignored artifacts:
+
+```bash
+.venv/bin/python -m pypto_test.collect_evidence \
+  --attention-device 0 --surrogate-device 1 \
+  --artifact-dir pypto_test/artifacts/full
+```
+
+The checked-in validation result is in
+`pypto_docs/pypto-wse-proxy-abc-validation-record.md`.

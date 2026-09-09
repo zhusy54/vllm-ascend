@@ -171,3 +171,12 @@ class RealWseBackend:
 
     def initialize(self) -> dict[str, Any]:
         raise NotImplementedError("real WSE backend is not part of this prototype")
+
+    def health(self) -> dict[str, Any]:
+        raise NotImplementedError("real WSE backend is not part of this prototype")
+
+    def drain(self) -> dict[str, Any]:
+        raise NotImplementedError("real WSE backend is not part of this prototype")
+
+    def close(self) -> None:
+        raise NotImplementedError("real WSE backend is not part of this prototype")

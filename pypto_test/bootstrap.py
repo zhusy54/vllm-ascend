@@ -6,8 +6,11 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
+import queue
 import socket
 import struct
+import time
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
@@ -23,7 +26,6 @@ from pypto_test.contracts import (
     WSE_WINDOW_BYTES,
     BootstrapLease,
     BorrowedWindowView,
-    ContractError,
     DeviceExecutionPort,
     EndpointBundle,
     EndpointRole,
@@ -35,6 +37,8 @@ from tools.pypto_wse_validation.acl_kernel import AclDeviceKernel
 from tools.pypto_wse_validation.acl_vmm import AclVmmRuntime, VmmExport
 
 MAX_CONTROL_FRAME_BYTES = 64 * 1024
+DEFAULT_CONTROL_HOST = "127.0.0.1"
+DEFAULT_CONNECT_TIMEOUT_SECONDS = 120.0
 _FRAME_LENGTH = struct.Struct("!I")
 _FORBIDDEN_CONTROL_KEYS = frozenset({"input", "output", "payload", "tensor", "token"})
 _MESSAGE_TYPES = frozenset(
@@ -151,6 +155,28 @@ def _receive_exact(connection: socket.socket, size: int) -> bytes:
         chunks.append(chunk)
         remaining -= len(chunk)
     return b"".join(chunks)
+
+
+def open_control_listener(host: str, port: int) -> socket.socket:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind((host, port))
+    listener.listen(1)
+    listener.settimeout(DEFAULT_CONNECT_TIMEOUT_SECONDS)
+    return listener
+
+
+def connect_control_endpoint(host: str, port: int) -> socket.socket:
+    deadline = time.monotonic() + DEFAULT_CONNECT_TIMEOUT_SECONDS
+    while True:
+        try:
+            connection = socket.create_connection((host, port), timeout=5.0)
+            connection.settimeout(DEFAULT_CONNECT_TIMEOUT_SECONDS)
+            return connection
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
 
 
 class ProxyControlChannel:
@@ -453,6 +479,40 @@ class RemoteWseServiceControl:
         self._closed = True
 
 
+class SurrogateProcessController:
+    """Bootstrap-owned lifetime handle for the remote Host process."""
+
+    def __init__(self, connection: socket.socket, process: Any, result_queue: Any) -> None:
+        self.connection = connection
+        self.process = process
+        self.result_queue = result_queue
+        self._result: dict[str, Any] | None = None
+
+    def collect(self) -> dict[str, Any]:
+        if self._result is not None:
+            return dict(self._result)
+        self.process.join(DEFAULT_CONNECT_TIMEOUT_SECONDS)
+        if self.process.is_alive():
+            self.process.terminate()
+            self.process.join(10)
+            raise BootstrapError("surrogate process did not exit")
+        try:
+            result = self.result_queue.get(timeout=5)
+        except queue.Empty as exc:
+            raise BootstrapError("surrogate process returned no evidence") from exc
+        if self.process.exitcode != 0 or result.get("status") != "PASS":
+            raise BootstrapError(f"surrogate process failed: {result}")
+        self.connection.close()
+        self._result = result
+        return dict(result)
+
+    def abort(self) -> None:
+        self.connection.close()
+        if self.process.is_alive():
+            self.process.terminate()
+            self.process.join(10)
+
+
 @dataclass(frozen=True)
 class SurrogateBootstrapResources:
     local_window: BorrowedWindowView
@@ -471,12 +531,50 @@ class BootstrapManager:
         memory_manager: NpuDeviceMemoryManager,
         run_id: str,
         generation: int,
+        process_controller: SurrogateProcessController | None = None,
     ) -> None:
         self.channel = channel
         self.memory_manager = memory_manager
         self.run_id = run_id
         self.generation = generation
         self._lease: BootstrapLease | None = None
+        self._lifecycle_events: list[str] = []
+        self._process_controller = process_controller
+        self._surrogate_evidence: dict[str, Any] | None = None
+
+    @classmethod
+    def launch_surrogate(
+        cls,
+        *,
+        endpoint_target: Any,
+        attention_device: int,
+        surrogate_device: int,
+        generation: int,
+        run_id: str,
+        kernel_binary: Path,
+        start_order: str,
+    ) -> BootstrapManager:
+        connection, process, result_queue = _launch_surrogate_process(
+            endpoint_target=endpoint_target,
+            start_order=start_order,
+            device_id=surrogate_device,
+            generation=generation,
+            run_id=run_id,
+            kernel_binary=kernel_binary,
+        )
+        channel = ProxyControlChannel(connection, run_id=run_id, generation=generation)
+        memory_manager = NpuDeviceMemoryManager(
+            endpoint_id="attention",
+            device_id=attention_device,
+            generation=generation,
+        )
+        return cls(
+            channel=channel,
+            memory_manager=memory_manager,
+            run_id=run_id,
+            generation=generation,
+            process_controller=SurrogateProcessController(connection, process, result_queue),
+        )
 
     def prepare(self) -> EndpointBundle:
         local_manifest = self.memory_manager.initialize()
@@ -491,6 +589,7 @@ class BootstrapManager:
         lease = BootstrapLease(f"lease-{uuid4().hex}", self.generation)
         lease.borrow()
         self._lease = lease
+        self._lifecycle_events.extend(("resources_prepared", "lease_borrowed"))
         bundle = EndpointBundle(
             generation=self.generation,
             endpoint_id=local_manifest.endpoint_id,
@@ -507,19 +606,32 @@ class BootstrapManager:
         bundle.validate()
         return bundle
 
-    def release(self) -> None:
+    def release(self) -> dict[str, Any] | None:
         if self._lease is None:
             raise BootstrapError("bootstrap resources were not prepared")
         if self._lease.state is not LeaseState.QUIESCED:
             raise BootstrapError("service must quiesce its lease before bootstrap release")
         self.channel.send("RELEASE", EndpointRole.ATTENTION)
         self.channel.receive("RELEASED", EndpointRole.WSE_SURROGATE)
+        self._lifecycle_events.append("surrogate_released")
         self.memory_manager.release()
         self._lease.release()
+        self._lifecycle_events.extend(("attention_released", "lease_released"))
+        if self._process_controller is not None:
+            self._surrogate_evidence = self._process_controller.collect()
+        return self._surrogate_evidence
+
+    def abort(self) -> None:
+        if self._process_controller is not None:
+            self._process_controller.abort()
+        self.memory_manager.release()
 
     def evidence(self) -> dict[str, Any]:
         return {
             "control": self.channel.evidence(),
+            "lease_id": self._lease.lease_id if self._lease is not None else None,
+            "lease_state": self._lease.state.value if self._lease is not None else None,
+            "lifecycle_events": list(self._lifecycle_events),
             "memory": self.memory_manager.evidence(),
             "run_id": self.run_id,
         }
@@ -539,3 +651,54 @@ def accept_surrogate_bootstrap(
     channel.send("ATTACHED", EndpointRole.WSE_SURROGATE)
     local, peer, port = memory_manager.borrowed_resources(peer_manifest)
     return SurrogateBootstrapResources(local, peer, port, peer_manifest)
+
+
+def _launch_surrogate_process(
+    *,
+    endpoint_target: Any,
+    start_order: str,
+    device_id: int,
+    generation: int,
+    run_id: str,
+    kernel_binary: Path,
+) -> tuple[socket.socket, Any, Any]:
+    context = multiprocessing.get_context("spawn")
+    ready_event = context.Event()
+    result_queue = context.Queue()
+    if start_order == "attention-first":
+        listener = open_control_listener(DEFAULT_CONTROL_HOST, 0)
+        port = listener.getsockname()[1]
+        listens = False
+    elif start_order == "wse-first":
+        reservation = open_control_listener(DEFAULT_CONTROL_HOST, 0)
+        port = reservation.getsockname()[1]
+        reservation.close()
+        listener = None
+        listens = True
+    else:
+        raise ValueError("start_order must be attention-first or wse-first")
+    process = context.Process(
+        target=endpoint_target,
+        kwargs={
+            "device_id": device_id,
+            "generation": generation,
+            "host": DEFAULT_CONTROL_HOST,
+            "kernel_binary": str(kernel_binary),
+            "listens": listens,
+            "port": port,
+            "ready_event": ready_event,
+            "result_queue": result_queue,
+            "run_id": run_id,
+        },
+        name=f"pypto-wse-surrogate-g{generation}",
+    )
+    process.start()
+    if listener is not None:
+        connection, _ = listener.accept()
+        listener.close()
+        connection.settimeout(DEFAULT_CONNECT_TIMEOUT_SECONDS)
+    else:
+        if not ready_event.wait(DEFAULT_CONNECT_TIMEOUT_SECONDS):
+            raise BootstrapError("surrogate listener did not become ready")
+        connection = connect_control_endpoint(DEFAULT_CONTROL_HOST, port)
+    return connection, process, result_queue

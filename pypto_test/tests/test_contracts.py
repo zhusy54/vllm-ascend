@@ -15,10 +15,15 @@ from pypto_test.contracts import (
     MAX_ELEMENTS,
     NPU_WINDOW_BYTES,
     WSE_WINDOW_BYTES,
+    BootstrapLease,
+    BorrowedWindowView,
     CompletionDescriptor,
     ContractError,
     DriverReport,
+    EndpointBundle,
+    EndpointRole,
     HostRequestDescriptor,
+    LeaseState,
     LifecycleLine,
     PseudoProgramSpec,
     RemoteTaskDescriptor,
@@ -90,3 +95,45 @@ def test_device_report_wire_sizes_are_stable():
     payload = bytes(16 * 8)
     assert DriverReport.from_bytes(payload).accepted == 0
     assert ServiceReport.from_bytes(payload).completed == 0
+
+
+class ContractFakePort:
+    generation = 2
+
+    def invalidate(self):
+        pass
+
+
+class ContractFakeControl:
+    pass
+
+
+def test_endpoint_bundle_rejects_generation_and_released_lease():
+    lease = BootstrapLease("lease", 1)
+    lease.borrow()
+    bundle = EndpointBundle(
+        1,
+        "attention",
+        "NPU_SURROGATE",
+        "FAKE",
+        "HOST_LOCAL",
+        DEFAULT_LAYOUT,
+        ContractFakePort(),
+        BorrowedWindowView(EndpointRole.ATTENTION, "npu", 1, 1, NPU_WINDOW_BYTES, NPU_WINDOW_BYTES),
+        BorrowedWindowView(EndpointRole.WSE_SURROGATE, "wse", 1, 2, WSE_WINDOW_BYTES, WSE_WINDOW_BYTES),
+        ContractFakeControl(),
+        lease,
+    )
+    with pytest.raises(ContractError, match="execution port generation"):
+        bundle.validate()
+    lease.quiesce()
+    lease.release()
+    assert lease.state is LeaseState.RELEASED
+    with pytest.raises(ContractError, match="lease"):
+        replace(bundle, execution_port=replace_port_generation(1)).validate()
+
+
+def replace_port_generation(generation):
+    port = ContractFakePort()
+    port.generation = generation
+    return port

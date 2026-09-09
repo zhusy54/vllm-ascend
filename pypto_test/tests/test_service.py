@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -68,13 +69,17 @@ class FakePort:
         self.writes = []
         self.ready = False
         self.stopped = False
+        self.auto_complete = True
+        self.request_submitted = threading.Event()
 
     def copy_host_to_device(self, destination, payload):
         offset = destination - self.base
         self.memory[offset : offset + len(payload)] = payload
         self.writes.append((offset, len(payload)))
         if offset == NPU_HOST_REQUEST_SIGNAL_OFFSET and len(payload) == 64:
-            self._complete_request()
+            self.request_submitted.set()
+            if self.auto_complete:
+                self._complete_request()
         elif offset == NPU_LIFECYCLE_OFFSET:
             self.stopped = True
 
@@ -148,9 +153,7 @@ def test_service_runs_fixed_abc_with_no_host_intermediate_progress():
     payload = deterministic_input(generation=1, request_id=1, element_count=32)
     result = service.execute(payload)
     assert result.output == expected_abc(payload)
-    request_submissions = [
-        item for item in port.writes if item == (NPU_HOST_REQUEST_SIGNAL_OFFSET, 64)
-    ]
+    request_submissions = [item for item in port.writes if item == (NPU_HOST_REQUEST_SIGNAL_OFFSET, 64)]
     assert len(request_submissions) == 1
     assert service.evidence()["traffic"]["host_intermediate_bytes"] == 0
     assert service.health()["state"] == "READY"
@@ -163,4 +166,31 @@ def test_service_runs_fixed_abc_with_no_host_intermediate_progress():
 def test_service_rejects_execute_before_initialize():
     service, _, _ = make_service()
     with pytest.raises(ServiceError, match="NEW"):
+        service.execute(bytes(4))
+
+
+def test_service_rejects_second_request_while_busy():
+    service, port, _ = make_service()
+    service.initialize()
+    port.auto_complete = False
+    payload = deterministic_input(generation=1, request_id=1, element_count=4)
+    result = []
+    worker = threading.Thread(target=lambda: result.append(service.execute(payload)))
+    worker.start()
+    assert port.request_submitted.wait(1)
+    with pytest.raises(ServiceError, match="EXECUTING"):
+        service.execute(payload)
+    port._complete_request()
+    worker.join(1)
+    assert not worker.is_alive()
+    assert result[0].output == expected_abc(payload)
+    service.close()
+
+
+def test_close_is_idempotent_and_prevents_execute():
+    service, _, _ = make_service()
+    service.initialize()
+    service.close()
+    service.close()
+    with pytest.raises(ServiceError, match="CLOSED"):
         service.execute(bytes(4))

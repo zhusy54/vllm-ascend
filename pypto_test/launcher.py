@@ -7,10 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import multiprocessing
-import queue
-import socket
-import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -18,38 +15,14 @@ from uuid import uuid4
 from pypto_test.backend import NpuSurrogateBackend
 from pypto_test.bootstrap import (
     BootstrapManager,
-    NpuDeviceMemoryManager,
     ProxyControlChannel,
     SurrogateDeviceMemoryManager,
     accept_surrogate_bootstrap,
+    connect_control_endpoint,
+    open_control_listener,
 )
 from pypto_test.contracts import EndpointRole, deterministic_input, expected_abc
 from pypto_test.service import PseudoPyptoDistributedService
-
-DEFAULT_CONTROL_HOST = "127.0.0.1"
-DEFAULT_CONNECT_TIMEOUT_SECONDS = 120.0
-
-
-def _open_listener(host: str, port: int) -> socket.socket:
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind((host, port))
-    listener.listen(1)
-    listener.settimeout(DEFAULT_CONNECT_TIMEOUT_SECONDS)
-    return listener
-
-
-def _connect(host: str, port: int) -> socket.socket:
-    deadline = time.monotonic() + DEFAULT_CONNECT_TIMEOUT_SECONDS
-    while True:
-        try:
-            connection = socket.create_connection((host, port), timeout=5.0)
-            connection.settimeout(DEFAULT_CONNECT_TIMEOUT_SECONDS)
-            return connection
-        except OSError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(0.05)
 
 
 def _surrogate_process(
@@ -70,12 +43,11 @@ def _surrogate_process(
     backend = None
     try:
         if listens:
-            listener = _open_listener(host, port)
+            listener = open_control_listener(host, port)
             ready_event.set()
             connection, _ = listener.accept()
-            connection.settimeout(DEFAULT_CONNECT_TIMEOUT_SECONDS)
         else:
-            connection = _connect(host, port)
+            connection = connect_control_endpoint(host, port)
             ready_event.set()
         channel = ProxyControlChannel(connection, run_id=run_id, generation=generation)
         memory_manager = SurrogateDeviceMemoryManager(
@@ -125,80 +97,15 @@ def _surrogate_process(
         raise
     finally:
         if backend is not None:
-            try:
+            with suppress(BaseException):
                 backend.close()
-            except BaseException:
-                pass
         if memory_manager is not None:
-            try:
+            with suppress(BaseException):
                 memory_manager.release()
-            except BaseException:
-                pass
         if connection is not None:
             connection.close()
         if listener is not None:
             listener.close()
-
-
-def _connected_surrogate(
-    *,
-    start_order: str,
-    device_id: int,
-    generation: int,
-    run_id: str,
-    kernel_binary: Path,
-) -> tuple[socket.socket, multiprocessing.Process, Any]:
-    context = multiprocessing.get_context("spawn")
-    ready_event = context.Event()
-    result_queue = context.Queue()
-    if start_order == "attention-first":
-        listener = _open_listener(DEFAULT_CONTROL_HOST, 0)
-        port = listener.getsockname()[1]
-        process = context.Process(
-            target=_surrogate_process,
-            kwargs={
-                "device_id": device_id,
-                "generation": generation,
-                "host": DEFAULT_CONTROL_HOST,
-                "kernel_binary": str(kernel_binary),
-                "listens": False,
-                "port": port,
-                "ready_event": ready_event,
-                "result_queue": result_queue,
-                "run_id": run_id,
-            },
-            name=f"pypto-wse-surrogate-g{generation}",
-        )
-        process.start()
-        connection, _ = listener.accept()
-        listener.close()
-        connection.settimeout(DEFAULT_CONNECT_TIMEOUT_SECONDS)
-    elif start_order == "wse-first":
-        reservation = _open_listener(DEFAULT_CONTROL_HOST, 0)
-        port = reservation.getsockname()[1]
-        reservation.close()
-        process = context.Process(
-            target=_surrogate_process,
-            kwargs={
-                "device_id": device_id,
-                "generation": generation,
-                "host": DEFAULT_CONTROL_HOST,
-                "kernel_binary": str(kernel_binary),
-                "listens": True,
-                "port": port,
-                "ready_event": ready_event,
-                "result_queue": result_queue,
-                "run_id": run_id,
-            },
-            name=f"pypto-wse-surrogate-g{generation}",
-        )
-        process.start()
-        if not ready_event.wait(DEFAULT_CONNECT_TIMEOUT_SECONDS):
-            raise TimeoutError("surrogate listener did not become ready")
-        connection = _connect(DEFAULT_CONTROL_HOST, port)
-    else:
-        raise ValueError("start_order must be attention-first or wse-first")
-    return connection, process, result_queue
 
 
 def run_generation(
@@ -211,24 +118,14 @@ def run_generation(
     kernel_dir: Path,
 ) -> dict[str, Any]:
     run_id = f"proxy-{uuid4().hex}"
-    connection, process, result_queue = _connected_surrogate(
+    bootstrap = BootstrapManager.launch_surrogate(
+        endpoint_target=_surrogate_process,
         start_order=start_order,
-        device_id=surrogate_device,
+        attention_device=attention_device,
+        surrogate_device=surrogate_device,
         generation=generation,
         run_id=run_id,
         kernel_binary=kernel_dir / "b_service.o",
-    )
-    channel = ProxyControlChannel(connection, run_id=run_id, generation=generation)
-    memory_manager = NpuDeviceMemoryManager(
-        endpoint_id="attention",
-        device_id=attention_device,
-        generation=generation,
-    )
-    bootstrap = BootstrapManager(
-        channel=channel,
-        memory_manager=memory_manager,
-        run_id=run_id,
-        generation=generation,
     )
     service = None
     try:
@@ -260,26 +157,25 @@ def run_generation(
         drain = service.drain()
         service.close()
         service_evidence = service.evidence()
-        bootstrap.release()
-        process.join(DEFAULT_CONNECT_TIMEOUT_SECONDS)
-        if process.is_alive():
-            process.terminate()
-            process.join(10)
-            raise TimeoutError("surrogate process did not exit")
-        try:
-            surrogate_evidence = result_queue.get(timeout=5)
-        except queue.Empty as exc:
-            raise RuntimeError("surrogate process returned no evidence") from exc
-        if process.exitcode != 0 or surrogate_evidence.get("status") != "PASS":
-            raise RuntimeError(f"surrogate process failed: {surrogate_evidence}")
+        surrogate_evidence = bootstrap.release()
         return {
             "bootstrap": bootstrap.evidence(),
             "devices": {"attention": attention_device, "wse_surrogate": surrogate_device},
+            "endpoint_bundle": {
+                "backend_kind": bundle.backend_kind,
+                "generation": bundle.generation,
+                "layout_hash": bundle.layout.layout_hash,
+                "lease_id": bundle.lease.lease_id,
+                "max_inflight": bundle.layout.max_inflight,
+                "transport_kind": bundle.transport_kind,
+                "transport_scope": bundle.transport_scope,
+            },
             "executions": executions,
             "generation": generation,
             "health": health,
             "initialization": initialization,
             "run_id": run_id,
+            "resident_kernel_launches": {"attention": 1, "wse_surrogate": 1},
             "service": service_evidence,
             "start_order": start_order,
             "status": "PASS",
@@ -287,10 +183,7 @@ def run_generation(
             "teardown": drain,
         }
     finally:
-        connection.close()
-        if process.is_alive():
-            process.terminate()
-            process.join(10)
+        bootstrap.abort()
 
 
 def _parse_args() -> argparse.Namespace:
