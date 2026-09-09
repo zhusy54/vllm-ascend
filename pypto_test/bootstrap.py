@@ -187,6 +187,12 @@ class ProxyControlChannel:
         self.sent_bytes += len(encoded)
 
     def receive(self, expected_type: str, expected_role: EndpointRole) -> dict[str, Any]:
+        message = self.receive_any(expected_role)
+        if message.get("type") != expected_type:
+            raise BootstrapError(f"control type mismatch: expected {expected_type}, received {message.get('type')}")
+        return message
+
+    def receive_any(self, expected_role: EndpointRole) -> dict[str, Any]:
         (size,) = _FRAME_LENGTH.unpack(_receive_exact(self.connection, _FRAME_LENGTH.size))
         if size <= 0 or size > MAX_CONTROL_FRAME_BYTES:
             raise BootstrapError("invalid control frame size")
@@ -202,7 +208,6 @@ class ProxyControlChannel:
             "protocol_version": PROTOCOL_VERSION,
             "role": expected_role.value,
             "run_id": self.run_id,
-            "type": expected_type,
         }
         for key, value in expected.items():
             if message.get(key) != value:
@@ -210,7 +215,10 @@ class ProxyControlChannel:
         forbidden = _find_forbidden_keys(message)
         if forbidden:
             raise BootstrapError(f"control message contains data-plane keys: {sorted(forbidden)}")
-        self.received_messages[expected_type] += 1
+        message_type = message.get("type")
+        if message_type not in _MESSAGE_TYPES:
+            raise BootstrapError(f"unsupported control message: {message_type}")
+        self.received_messages[str(message_type)] += 1
         self.received_bytes += size
         return message
 
@@ -309,6 +317,8 @@ class DeviceMemoryManager:
         self._peer: _ImportedWindow | None = None
         self._port: BorrowedDeviceExecutionPort | None = None
         self._closed = False
+        self._allocated_window_count = 0
+        self._mapping_count = 0
 
     def initialize(self) -> WindowManifest:
         if self._closed or self._local is not None:
@@ -316,6 +326,8 @@ class DeviceMemoryManager:
         self._runtime.initialize()
         self.audit.record(actor=self.__class__.__name__, operation="runtime_initialize", buffer_id=self.endpoint_id)
         self._local = self._runtime.allocate_window(self.logical_bytes)
+        self._allocated_window_count += 1
+        self._mapping_count += 1
         self.audit.record(actor=self.__class__.__name__, operation="allocate", buffer_id=self.local_buffer_id)
         export = self._local.export
         return WindowManifest(
@@ -341,6 +353,7 @@ class DeviceMemoryManager:
             raise BootstrapError("cannot attach a manifest with the local role")
         exported = VmmExport(peer.device_id, peer.mapping_bytes, peer.shareable_handle)
         self._peer = self._runtime.import_window(exported, peer_device_id=peer.device_id)
+        self._mapping_count += 1
         self.audit.record(actor=self.__class__.__name__, operation="attach", buffer_id=peer.buffer_id)
 
     def borrowed_resources(
@@ -382,9 +395,11 @@ class DeviceMemoryManager:
         if self._peer is not None:
             self._peer.close()
             self.audit.record(actor=self.__class__.__name__, operation="detach", buffer_id="peer-window")
+            self._peer = None
         if self._local is not None:
             self._local.close()
             self.audit.record(actor=self.__class__.__name__, operation="free", buffer_id=self.local_buffer_id)
+            self._local = None
         self._runtime.close()
         self.audit.record(actor=self.__class__.__name__, operation="runtime_close", buffer_id=self.endpoint_id)
         self._closed = True
@@ -395,8 +410,10 @@ class DeviceMemoryManager:
             "device_id": self.device_id,
             "endpoint_id": self.endpoint_id,
             "generation": self.generation,
-            "mapping_count": int(self._local is not None) + int(self._peer is not None),
-            "owned_window_count": int(self._local is not None),
+            "allocated_window_count": self._allocated_window_count,
+            "live_mapping_count": int(self._local is not None) + int(self._peer is not None),
+            "live_owned_window_count": int(self._local is not None),
+            "mapping_count": self._mapping_count,
             "role": self.role.value,
         }
 

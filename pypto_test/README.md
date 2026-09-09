@@ -5,7 +5,23 @@ NPU `A -> B -> C` distributed service described in
 `pypto_docs/pypto-wse-proxy-abc-validation-plan.md`.
 
 The prototype does not import `vllm_ascend` and does not validate the PyPTO
-compiler or scheduler. It reuses only the existing low-level ACL VMM, control
-channel, and AIV binary helpers from `tools/pypto_wse_validation`.
+compiler or scheduler. It reuses only the existing low-level ACL VMM and AIV
+binary helpers from `tools/pypto_wse_validation`.
 
-Build and run instructions are added with the executable implementation.
+Build the two resident kernels:
+
+```bash
+bash pypto_test/build_kernels.sh
+```
+
+Run one generation with two same-host NPU devices:
+
+```bash
+.venv/bin/python -m pypto_test.launcher \
+  --attention-device 0 --surrogate-device 1 \
+  --start-order attention-first --elements 1 1024
+```
+
+The Host only writes the request input and submission control, then polls and
+reads the final result. A, remote B dispatch/completion, and C are advanced by
+the two resident device kernels.

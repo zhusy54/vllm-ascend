@@ -116,3 +116,5 @@ def test_memory_manager_is_sole_allocator_and_releaser():
     assert runtime.local_window.closed
     assert runtime.peer_window.closed
     assert runtime.closed
+    assert manager.evidence()["live_mapping_count"] == 0
+    assert manager.evidence()["mapping_count"] == 2
