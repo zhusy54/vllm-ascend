@@ -8,9 +8,9 @@
 //
 //   Host request signal
 //     -> read local_input and execute A(x) = x + 1
-//     -> write A output to remote_b_input (surrogate-owned VMM window)
+//     -> write A output to remote_b_input (WSE-owned VMM window)
 //     -> publish remote B descriptor and submission signal
-//     -> wait on local B completion written remotely by the surrogate Device
+//     -> wait on local B completion written remotely by the WSE-side Device
 //     -> read local_b_output and execute C(b) = b + 3
 //     -> publish final output/descriptor/signal for the Host
 //
@@ -179,7 +179,7 @@ extern "C" __global__ __aicore__ void pypto_abc_driver_0_mix_aiv(
     ++report.accepted;
 
     // Stage A executes locally, but its output destination is an imported
-    // mapping of surrogate HBM.  Store32 therefore performs the NPU->surrogate
+    // mapping of WSE-side HBM.  Store32 therefore performs the NPU->WSE
     // Device data transfer without a Host copy.
     uint64_t observed_input_checksum = 0;
     uint64_t a_checksum = 0;
@@ -207,7 +207,7 @@ extern "C" __global__ __aicore__ void pypto_abc_driver_0_mix_aiv(
 
     // This is the A->B->C dependency edge.  The Attention Device waits on its
     // local completion cache line, but that line is written remotely by the
-    // surrogate Device.  No Host RPC or polling participates here.
+    // WSE-side Device.  No Host RPC or polling participates here.
     while (Load64(&b_completion_signal->sequence) < sequence && Load64(&lifecycle->stop_requested) == 0) {
       ++report.b_wait_cycles;
     }

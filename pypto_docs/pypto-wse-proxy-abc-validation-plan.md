@@ -5,7 +5,7 @@
 本文定义一个不依赖 PyPTO Compiler 和 Scheduler 的代理层原型，用来验证未来 PyPTO
 分布式服务的接口假设、资源边界和单次任务执行流程。
 
-原型把第二张 NPU 作为 WSE surrogate。在非 PyPTO 的外部资源层完成双进程启动、
+原型使用第二张 NPU 仿真 WSE 侧 Device。在非 PyPTO 的外部资源层完成双进程启动、
 Device Memory 分配、VMM handle 交换和 peer attach 后，将已经就绪的通信资源以
 `EndpointBundle` 形式借给代理层。上层只访问 NPU Host 上的代理服务入口。
 
@@ -15,9 +15,9 @@ Device Memory 分配、VMM handle 交换和 peer attach 后，将已经就绪的
 Host input
   → NPU Device
   → A(NPU)
-  → NPU-to-WSE-surrogate Device Memory
-  → B(WSE surrogate)
-  → WSE-surrogate-to-NPU Device Memory
+  → NPU-to-WSE Device Memory
+  → B(WSE)
+  → WSE-to-NPU Device Memory
   → C(NPU)
   → Host result
 ```
@@ -35,8 +35,8 @@ Host input
 
 | 项目 | 首版决策 |
 | --- | --- |
-| WSE 形态 | 第二张 NPU 作为 WSE surrogate，预留真实 WSE backend |
-| 设备执行 | Attention driver 和 surrogate service 使用常驻 AIV kernel |
+| WSE 形态 | 第二张 NPU 仿真 WSE Device，预留真实 WSE backend |
+| 设备执行 | Attention driver 和 WSE service 使用常驻 AIV kernel |
 | PyPTO 依赖 | 不使用 PyPTO Compiler/Scheduler，提供伪 PyPTO 服务接口 |
 | 资源所有权 | 外部 `BootstrapManager` 所有，代理层只借用 |
 | 请求接口 | 同步、单请求、`max_inflight=1` |
@@ -50,7 +50,7 @@ Host input
 
 本原型通过后可以声明：
 
-- 同 Host 双 NPU surrogate 上，外部通信资源可以注入伪 PyPTO 服务。
+- 同 Host 双 NPU 环境中，外部通信资源可以注入伪 PyPTO 服务。
 - 上层可以通过 NPU Host 的单一同步接口调用分布式 A→B→C 程序。
 - A、B、C 的中间数据和执行推进不经过 Host。
 - 代理层能够提供足够的状态或执行证据，证明预定义 ABC 程序的执行顺序和结果正确。
@@ -70,7 +70,7 @@ Host input
 
 ```text
 PSEUDO_PYPTO_SERVICE
-HOST_LOCAL_NPU_SURROGATE
+HOST_LOCAL_SECOND_NPU_WSE
 AIV_DEVICE_DRIVEN_ABC
 SINGLE_REQUEST_SYNCHRONOUS
 ```
@@ -87,7 +87,6 @@ flowchart TB
         BM["BootstrapManager"]
         NM["NpuDeviceMemoryManager"]
         PS["PseudoPyptoDistributedService"]
-        HC["HostCompletionObserver"]
         BM --> NM
     end
 
@@ -95,14 +94,14 @@ flowchart TB
         DK["Resident ABC Driver AIV Kernel"]
     end
 
-    subgraph WH["WSE surrogate独立进程"]
-        BA["WseSurrogateBootstrapAgent"]
-        SM["SurrogateDeviceMemoryManager"]
-        WB["NpuSurrogateBackend"]
+    subgraph WH["WSE Host独立进程"]
+        BA["WSE Host控制面"]
+        SM["WseDeviceMemoryManager"]
+        WB["WseBackend"]
         BA --> SM
     end
 
-    subgraph WP["WSE surrogate NPU"]
+    subgraph WP["WSE Device（首版由第二张NPU仿真）"]
         BK["Resident B Service AIV Kernel"]
     end
 
@@ -112,13 +111,12 @@ flowchart TB
     PS -.->|"start/health/drain/close"| BA
     BA -->|"initialize/stop backend"| WB
     NM -.->|"provision NPU-owned windows"| DK
-    SM -.->|"provision surrogate-owned windows"| BK
+    SM -.->|"provision WSE-owned windows"| BK
     WB -.->|"load/start/stop"| BK
     PS -->|"input + request descriptor / DeviceExecutionPort"| DK
     DK ==>|"A output + B descriptor / WSE-owned memory"| BK
     BK ==>|"B output + completion / NPU-owned memory"| DK
-    DK -->|"final output + HostResultCompletion"| HC
-    HC -->|"validated final result"| PS
+    DK -->|"final output + HostResultCompletion"| PS
     PS -->|"ExecutionResult"| U
 ```
 
@@ -140,13 +138,12 @@ flowchart TB
 | --- | --- | --- | --- |
 | `BootstrapManager` | NPU Host入口进程 | 编排两端初始化、handle交换、建链和资源生命周期 | 否 |
 | `NpuDeviceMemoryManager` | NPU Host入口进程 | 创建和释放NPU侧Device Context、owned window和peer mapping | 否 |
-| `WseSurrogateBootstrapAgent` | WSE surrogate进程 | 执行远端Bootstrap及backend生命周期命令 | 否 |
-| `SurrogateDeviceMemoryManager` | WSE surrogate进程 | 创建和释放surrogate侧owned window和peer mapping | 否 |
+| `WSE Host控制面` | WSE Host进程 | 执行远端Bootstrap及backend生命周期命令 | 否 |
+| `WseDeviceMemoryManager` | WSE Host进程 | 创建和释放WSE侧owned window和peer mapping | 否 |
 | `PseudoPyptoDistributedService` | NPU Host入口进程 | 接收请求、提交整体invocation并返回最终结果 | 是，仅入口和最终返回 |
-| `HostCompletionObserver` | NPU Host入口进程 | 等待最终signal，校验completion并读取最终payload | 是，仅最终完成 |
-| `NpuSurrogateBackend` | WSE surrogate进程 | 加载、启动、健康检查和停止B Service | 否 |
+| `WseBackend` | WSE Host进程 | 加载、启动、健康检查和停止B Service | 否 |
 | `Resident ABC Driver` | Attention NPU | 执行A、设备侧提交并等待B、执行C和发布最终完成 | 是 |
-| `Resident B Service` | WSE surrogate NPU | 消费B请求、执行B并写回结果和completion | 是 |
+| `Resident B Service` | WSE Device（第二张NPU仿真） | 消费B请求、执行B并写回结果和completion | 是 |
 
 以下是模块使用的数据、资源或能力接口，不作为运行模块：
 
@@ -163,11 +160,12 @@ flowchart TB
 图中的结果返回路径为：
 
 ```text
-Resident B Service → Resident ABC Driver → HostCompletionObserver
+Resident B Service → Resident ABC Driver
+  → PseudoPyptoDistributedService._wait_for_final_completion()
   → PseudoPyptoDistributedService → 上层调用者
 ```
 
-结果不经过WSE surrogate Host、TCP控制面或`BootstrapManager`；详细步骤由第11章描述，
+结果不经过WSE Host、TCP控制面或`BootstrapManager`；详细步骤由第11章描述，
 可见性规则由第12.3节定义。
 
 ## 5. 软件分层与职责
@@ -186,7 +184,7 @@ service.close()
 
 上层调用者不感知：
 
-- NPU/WSE surrogate Device ID；
+- NPU/WSE Device ID；
 - VMM handle、peer address 和 P2P 配置；
 - B submission/completion queue；
 - A/B/C kernel 名称；
@@ -196,9 +194,9 @@ service.close()
 
 `BootstrapManager` 位于代理层以上，使用非 PyPTO 能力完成：
 
-- 拉起 WSE surrogate 独立进程；
-- 通过 `NpuDeviceMemoryManager` 初始化 NPU 侧 Device Context 和通信内存；
-- 指挥远端 `SurrogateDeviceMemoryManager` 初始化 surrogate 侧 Device Context 和通信内存；
+- 通过`launch_wse_host()`拉起WSE Host并完成非通信初始化；
+- 通过`launch_npu_host()`完成NPU Host及本地Device Context的非通信初始化；
+- 通过`build_communication()`指挥两侧MemoryManager分配通信内存并完成建链；
 - VMM handle 导出和 TCP 交换；
 - peer handle 导入和 P2P attach；
 - Transport、layout 和 generation 校验；
@@ -207,10 +205,9 @@ service.close()
 - 代理关闭后的 detach、unregister、free 和 Device Context close。
 
 `BootstrapManager` 是两端通信内存的逻辑所有者和生命周期协调者，但不能跨进程直接调用
-surrogate Device Context。NPU 侧分配/释放由本地 `NpuDeviceMemoryManager` 实际执行，
-surrogate 侧分配/释放由 `WseSurrogateBootstrapAgent` 内的
-`SurrogateDeviceMemoryManager` 实际执行。二者都属于 Bootstrap 子系统，不属于代理服务
-或 `NpuSurrogateBackend`。底层 ACL/VMM API 只是实现内存操作的原语，不承担资源所有权
+WSE Device Context。NPU侧分配/释放由本地`NpuDeviceMemoryManager`实际执行，WSE侧
+分配/释放由WSE Host内的`WseDeviceMemoryManager`实际执行。二者都属于Bootstrap子系统，
+不属于代理服务或`WseBackend`。底层ACL/VMM API只是实现内存操作的原语，不承担资源所有权
 和生命周期策略。
 
 `BootstrapManager` 不负责：
@@ -226,7 +223,7 @@ surrogate 侧分配/释放由 `WseSurrogateBootstrapAgent` 内的
 代理层负责：
 
 - 校验 `EndpointBundle` 和 `PseudoProgramSpec`；
-- 启动 NPU resident driver 和 WSE surrogate resident service；
+- 启动 NPU resident driver 和 WSE resident service；
 - 接收同步 Host 输入；
 - 生成 request ID 和 invocation descriptor；
 - 将输入复制到 NPU Device Memory；
@@ -240,7 +237,7 @@ surrogate 侧分配/释放由 `WseSurrogateBootstrapAgent` 内的
 
 - 创建、注册、导出或导入通信窗口；
 - 解析 CANN VMM shareable handle；
-- 获取 `NpuDeviceMemoryManager` 或 `SurrogateDeviceMemoryManager`；
+- 获取 `NpuDeviceMemoryManager` 或 `WseDeviceMemoryManager`；
 - 逐阶段在 Host 启动 A、B、C；
 - Host 中转 A/B 中间数据；
 
@@ -249,7 +246,7 @@ surrogate 侧分配/释放由 `WseSurrogateBootstrapAgent` 内的
 这些机制属于原型内部实现，不作为 PyPTO Compiler/Scheduler 能力通过的证据。无论采用
 哪种内部实现，Host 都不能根据 A/B 的完成事件逐阶段发起后续计算或中转中间数据。
 
-### 5.4 NpuSurrogateBackend
+### 5.4 WseBackend
 
 首版 backend 负责：
 
@@ -259,7 +256,7 @@ surrogate 侧分配/释放由 `WseSurrogateBootstrapAgent` 内的
 - 报告 READY、health 和最终 stop；
 - 提供 kernel hash 和设备执行报告。
 
-`NpuSurrogateBackend` 不创建、导入、映射或释放通信内存，也不持有两个 MemoryManager。
+`WseBackend`不创建、导入、映射或释放通信内存，也不持有两个MemoryManager。
 
 未来真实 WSE backend 必须保持代理层接口不变，只替换：
 
@@ -275,17 +272,17 @@ surrogate 侧分配/释放由 `WseSurrogateBootstrapAgent` 内的
 
 ```text
 BootstrapManager subsystem logically owns:
-  WSE surrogate process/control session
+  WSE Host process/control session
   BootstrapLease
   NpuDeviceMemoryManager
     NPU Device Context
     NPU owned window
     NPU imported peer mapping
-  WseSurrogateBootstrapAgent
-    SurrogateDeviceMemoryManager
-      surrogate Device Context
-      surrogate owned window
-      surrogate imported NPU mapping
+  WSE Host control plane
+    WseDeviceMemoryManager
+      WSE Device Context
+      WSE owned window
+      WSE imported NPU mapping
 
 PseudoPyptoDistributedService borrows:
   DeviceExecutionPort
@@ -297,16 +294,20 @@ PseudoPyptoDistributedService borrows:
 ```
 
 逻辑所有权统一归于 `BootstrapManager`，物理操作由 Device Context 所在进程的本地
-MemoryManager 执行。代理层和 `NpuSurrogateBackend` 均不得直接调用
+MemoryManager 执行。代理层和`WseBackend`均不得直接调用
 `allocate_window()`、`import_window()`、`map_window()` 或 `free_window()`。可以在单元
 测试中将这些 API 替换成“调用即失败”的桩，确认服务执行期间没有越过边界。
 
 ### 6.2 生命周期顺序
 
 ```text
-BootstrapManager.prepare()
+BootstrapManager.launch_wse_host()
+  → launch WSE Host and initialize WSE Device runtime/context
+BootstrapManager.launch_npu_host()
+  → initialize NPU Host and NPU Device runtime/context
+BootstrapManager.build_communication()
   → NpuDeviceMemoryManager allocate/register/export
-  → command SurrogateDeviceMemoryManager allocate/register/export
+  → command WseDeviceMemoryManager allocate/register/export
   → exchange/import/attach on both local managers
   → create DeviceExecutionPort and BootstrapLease
   → EndpointBundle CREATED
@@ -423,14 +424,14 @@ NpuWindow
   lifecycle                         ProxyLifecycleControl
 ```
 
-WSE surrogate需要写入：
+WSE Device需要写入：
 
 - `b_output`
 - `b_completion`
 
-### 8.2 WSE surrogate owned window
+### 8.2 WSE owned window
 
-由 surrogate 进程内的 `SurrogateDeviceMemoryManager` 分配和释放：
+由WSE Host进程内的`WseDeviceMemoryManager`分配和释放：
 
 ```text
 WseWindow
@@ -567,15 +568,13 @@ def initialize(
     ...
 ```
 
-执行：
+`initialize()`按以下五个内部函数依次执行：
 
-1. 状态必须为`NEW`。
-2. 校验lease、generation、layout和backend capability。
-3. 校验program严格为A-B-C。
-4. 通过generation级WSE control启动resident B service。
-5. 启动resident NPU ABC driver。
-6. 双方发布kernel ready。
-7. 汇总为`SERVICE_READY`。
+1. `_validate_initialization_context()`：校验状态、program、lease、layout和backend capability。
+2. `_initialize_control_regions()`：初始化resident kernel使用的控制区。
+3. `_start_wse_execution_service()`：通过WSE control启动resident B service。
+4. `_start_npu_execution_driver()`：绑定两侧地址并启动resident NPU ABC driver。
+5. `_wait_until_ready()`：等待两端Device任务READY并将服务置为`READY`。
 
 初始化失败必须保持fail closed，不允许进入`READY`。
 
@@ -594,7 +593,7 @@ def execute(self, host_input: Buffer, timeout_s: float) -> ExecutionResult:
 4. H2D复制到NPU `input_x`。
 5. 写入`HostRequestDescriptor`。
 6. 执行Host→Device可见性操作并发布本地request signal。
-7. 由独立 `HostCompletionObserver` 轮询最终 signal 并读取
+7. 由Service私有方法`_wait_for_final_completion()`轮询最终signal并读取
    `HostResultCompletion`，不等待中间B completion。
 8. 校验generation、request ID、status、长度和checksum。
 9. D2H复制`final_output`。
@@ -609,7 +608,7 @@ def execute(self, host_input: Buffer, timeout_s: float) -> ExecutionResult:
 - service状态；
 - generation和lease有效性；
 - NPU driver ready/运行状态；
-- WSE surrogate service ready/运行状态；
+- WSE service ready/运行状态；
 - 当前request ID；
 - 最近一次执行结果。
 
@@ -640,7 +639,7 @@ sequenceDiagram
     participant U as Upper Caller
     participant P as PseudoPyptoService/NPU Host
     participant N as NPU ABC Driver
-    participant W as WSE Surrogate B Service
+    participant W as WSE B Service
 
     U->>P: execute(host_input)
     P->>P: validate and allocate request_id
@@ -697,7 +696,7 @@ wait HOST_INPUT_READY
 PyPTO Scheduler实现。设备报告必须记录poll cycles，便于评估后续迁移到AICPU event或
 异步通信引擎的必要性。
 
-### 12.2 WSE surrogate B service
+### 12.2 WSE B service
 
 初始化后常驻：
 
@@ -774,7 +773,7 @@ host_mid_graph_kernel_launches    = 0
 - generation、lease、layout mismatch失败；
 - `EndpointBundle` 和 `DeviceExecutionPort` 不暴露 MemoryManager 或
   allocate/import/map/free；
-- service和`NpuSurrogateBackend`不能调用通信内存管理API；
+- service和`WseBackend`不能调用通信内存管理API；
 - 非READY状态不能execute；
 - 单请求执行期间第二次execute返回BUSY；
 - close后不能execute；
@@ -799,7 +798,7 @@ host_mid_graph_kernel_launches    = 0
 - 两端各只启动一次resident kernel；
 - 初始化阶段没有Tensor业务数据；
 - 所有allocate/import/map调用均可追溯到Bootstrap子系统的两个本地MemoryManager；
-- service和`NpuSurrogateBackend`未越权分配通信资源。
+- service和`WseBackend`未越权分配通信资源。
 
 ### V02：单次4 KiB A-B-C
 
@@ -902,7 +901,7 @@ host_mid_graph_kernel_launches    = 0
 - 执行中drain/close；
 - 并发请求和queue full。
 
-这些用例由既有通信验证覆盖了surrogate协议基础，但新的代理服务仍需在后续阶段重新验证。
+这些用例由既有通信验证覆盖了第二张NPU仿真协议基础，但新的代理服务仍需重新验证。
 
 ## 16. 观测和证据
 
@@ -930,7 +929,7 @@ NPU driver report：
 - 等待Host request和B completion的cycles；
 - 最终执行cycles。
 
-WSE surrogate service report：
+WSE service report：
 
 - B accepted/completed数；
 - A output校验数；
@@ -958,7 +957,7 @@ artifacts/<run_id>/
   endpoint_bundle.json          # 脱敏摘要
   program_spec.json
   npu_proxy.json
-  wse_surrogate.json
+  wse.json
   result.json
   device_logs/
 ```
@@ -974,7 +973,7 @@ artifacts/<run_id>/
 3. 上层只调用代理服务API，不直接访问Transport或WSE进程。
 4. Bootstrap子系统独占通信资源的逻辑所有权；两端物理操作仅由各自本地
    MemoryManager执行。
-5. 代理服务、`NpuSurrogateBackend`、`EndpointBundle`和`DeviceExecutionPort`均不能调用
+5. 代理服务、`WseBackend`、`EndpointBundle`和`DeviceExecutionPort`均不能调用
    allocate/import/map/free。
 6. 每个请求只发生输入 H2D、最终 signal/completion 控制 D2H 和最终 payload D2H，且三类
    字节分别统计。
@@ -983,7 +982,7 @@ artifacts/<run_id>/
 9. 所有消息大小和100次重复请求结果正确。
 10. 两个resident kernel每个generation各只launch一次。
 11. 正常drain/close/release顺序正确且无残留资源。
-12. 结论明确标记为NPU surrogate、HOST_LOCAL和AIV driver。
+12. 结论明确标记为第二张NPU仿真WSE、HOST_LOCAL和AIV driver。
 
 ## 18. 当前已有能力和可复用内容
 
@@ -992,7 +991,7 @@ artifacts/<run_id>/
 - 两进程TCP bootstrap和启动顺序控制；
 - ACL Device Context和VMM window分配；
 - VMM handle跨进程交换、import和P2P mapping；
-- NPU→surrogate和surrogate→NPU双向Device Memory访问；
+- NPU→WSE和WSE→NPU双向Device Memory访问；
 - `AclDeviceKernel`加载、launch、synchronize和close；
 - AIV resident driver/service的remote load/store与`DSB_ALL`模式；
 - generation、slot、checksum和设备报告基础；
@@ -1015,26 +1014,26 @@ artifacts/<run_id>/
 - 对上层稳定的伪PyPTO服务对象。
 - `initialize/execute/health/drain/close`状态机。
 - Host输入和最终结果的同步request API。
-- 不依赖常驻 Kernel stream 结束、且只读取最终 signal/completion 的
-  `HostCompletionObserver`。
+- 不依赖常驻Kernel stream结束、且只读取最终signal/completion的
+  `_wait_for_final_completion()`。
 - 单请求BUSY和request ID管理。
 - `ExecutionResult`和结构化错误。
 
 ### 19.2 资源注入边界
 
 - 独立`BootstrapManager`和`BootstrapLease`。
-- 归属Bootstrap子系统的`NpuDeviceMemoryManager`和`SurrogateDeviceMemoryManager`。
+- 归属Bootstrap子系统的`NpuDeviceMemoryManager`和`WseDeviceMemoryManager`。
 - BootstrapManager到远端MemoryManager的分配、映射和释放控制协议。
 - 只读/借用语义的`EndpointBundle`。
 - 不含内存管理能力的`DeviceExecutionPort`。
-- 防止代理或`NpuSurrogateBackend`释放、映射或重新分配通信资源的API约束。
+- 防止代理或`WseBackend`释放、映射或重新分配通信资源的API约束。
 - release前检查代理已经quiesced/closed。
 
 ### 19.3 任务和设备执行
 
 - 固定A-B-C `PseudoProgramSpec`；依赖解析和内部状态管理为可选实现。
 - NPU resident ABC driver kernel。
-- WSE surrogate resident B service kernel。
+- WSE resident B service kernel（首版在第二张NPU上运行）。
 - Host本地request ingress和final result completion。
 - A→B和B→C的descriptor、checksum、fence及可证明执行顺序的阶段证据。
 - 多次同步请求下的resident kernel循环和STOP协议。
@@ -1042,7 +1041,7 @@ artifacts/<run_id>/
 ### 19.4 Backend可替换性
 
 - `WseExecutionBackend`抽象。
-- `NpuSurrogateBackend`实现。
+- `WseBackend`实现。
 - 真实WSE backend所需capability contract和未实现占位。
 - backend不能持有MemoryManager或向代理暴露VMM/ACL私有细节的边界测试。
 
@@ -1065,8 +1064,7 @@ pypto_test/
   bootstrap.py
   backend.py
   service.py
-  launcher.py
-  collect_evidence.py
+  run_proxy_service.py
   README.md
   .gitignore
   kernels/
@@ -1079,6 +1077,9 @@ pypto_test/
     test_backend.py
     test_service.py
     test_evidence.py
+  validation/
+    validation_utils.py
+    collect_evidence.py
   build/       # gitignored
   artifacts/   # gitignored
 
@@ -1093,12 +1094,12 @@ pypto_docs/
 | --- | --- |
 | `contracts.py` | ProgramSpec、EndpointBundle、DeviceExecutionPort、descriptor、completion、状态和report |
 | `bootstrap.py` | BootstrapManager、两端本地MemoryManager、远端控制协议、manifest、attach、lease和release |
-| `backend.py` | WSE backend接口及NPU surrogate实现 |
-| `service.py` | 五个服务API、同步execute、状态机和最终completion observer |
-| `launcher.py` | 实机运行入口和两种启动顺序 |
+| `backend.py` | WSE backend接口及第二张NPU仿真实现 |
+| `service.py` | 五个服务API、同步execute、状态机和最终completion等待 |
+| `run_proxy_service.py` | 实机运行入口和两种启动顺序 |
 | `abc_driver.cpp` | NPU A、remote B dispatch、等待B、C和final completion |
-| `b_service.cpp` | surrogate B service和remote completion |
-| `collect_evidence.py` | 汇总V01～V06并生成限定范围结论 |
+| `b_service.cpp` | WSE侧B service和remote completion |
+| `validation/` | 输入与结果oracle、V01～V06矩阵、证据校验和产物生成 |
 
 ## 21. 推荐实现顺序
 
@@ -1114,7 +1115,7 @@ pypto_docs/
 
 ### M1：提取BootstrapManager
 
-- 从现有stage1代码提取`NpuDeviceMemoryManager`和`SurrogateDeviceMemoryManager`，把VMM
+- 从现有stage1代码提取`NpuDeviceMemoryManager`和`WseDeviceMemoryManager`，把VMM
   分配、handle交换、attach和释放全部收口到Bootstrap子系统。
 - 返回不含内存管理接口的borrowed bundle、`DeviceExecutionPort`和独立lease。
 - 保持现有T01～T12不回归。
@@ -1124,7 +1125,7 @@ pypto_docs/
 
 ### M2：实现resident A/B/C kernel
 
-- 实现NPU ABC driver和surrogate B service。
+- 实现NPU ABC driver和WSE侧B service。
 - 增加本地Host request/final result信号。
 - 复用既有P2P和fence路径。
 
@@ -1155,7 +1156,7 @@ pypto_docs/
 
 1. 保持服务API不变，把固定A-B-C状态机替换为PyPTO Endpoint和Remote Task。
 2. 将NPU AIV driver迁移到AICPU Scheduler或设备异步通信引擎。
-3. 保持`WseExecutionBackend`不变，使用真实WSE替换NPU surrogate。
+3. 保持`WseExecutionBackend`不变，使用真实WSE替换当前第二张NPU实现。
 4. 重跑错误generation、timeout、进程退出和执行中drain等故障测试。
 5. 将HOST_LOCAL VMM P2P替换为跨Host RoCE/UB，并执行C3 gate。
 6. 最后用Ray/vLLM Executor替换`BootstrapManager`的进程编排入口。

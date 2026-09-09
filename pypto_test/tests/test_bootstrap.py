@@ -17,12 +17,13 @@ import pytest
 
 from pypto_test.bootstrap import (
     BootstrapError,
+    BootstrapManager,
     BorrowedDeviceExecutionPort,
     NpuDeviceMemoryManager,
     ProxyControlChannel,
     WindowManifest,
 )
-from pypto_test.contracts import EndpointRole
+from pypto_test.contracts import WSE_WINDOW_BYTES, EndpointRole
 from tools.pypto_wse_validation.acl_vmm import VmmExport
 
 
@@ -72,6 +73,21 @@ class FakeRuntime:
         self.closed = True
 
 
+class FakeControlChannel:
+    def __init__(self, peer_manifest):
+        self.peer_manifest = peer_manifest
+        self.sent = []
+
+    def send(self, message_type, role, **fields):
+        self.sent.append((message_type, role, fields))
+
+    def receive(self, expected_type, expected_role):
+        del expected_role
+        if expected_type == "MANIFEST":
+            return {"manifest": self.peer_manifest.to_dict()}
+        return {"type": expected_type}
+
+
 def test_window_manifest_round_trip_and_redacts_handle():
     manifest = WindowManifest("attention", EndpointRole.ATTENTION, 0, 2, "npu-window", 10, 16, 99)
     decoded = WindowManifest.from_dict(manifest.to_dict())
@@ -111,12 +127,14 @@ def test_execution_port_enforces_borrowed_ranges_and_invalidation():
 def test_memory_manager_is_sole_allocator_and_releaser():
     runtime = FakeRuntime()
     manager = NpuDeviceMemoryManager(endpoint_id="attention", device_id=0, generation=1, runtime=runtime)
-    local = manager.initialize()
-    peer = WindowManifest("surrogate", EndpointRole.WSE_SURROGATE, 1, 1, "wse-window", 64, 64, 88)
+    manager.initialize_runtime()
+    local = manager.allocate_window()
+    peer = WindowManifest("wse", EndpointRole.WSE, 1, 1, "wse-window", 64, 64, 88)
     manager.attach(peer)
     _, _, port = manager.borrowed_resources(peer)
-    assert manager.audit.actors() == {"NpuDeviceMemoryManager"}
-    assert [item["operation"] for item in manager.audit.operations] == ["runtime_initialize", "allocate", "attach"]
+    audit = manager.evidence()["audit"]
+    assert {item["actor"] for item in audit} == {"NpuDeviceMemoryManager"}
+    assert [item["operation"] for item in audit] == ["runtime_initialize", "allocate", "attach"]
     assert local.buffer_id == "npu-window"
     assert not hasattr(port, "release")
     manager.release()
@@ -125,3 +143,40 @@ def test_memory_manager_is_sole_allocator_and_releaser():
     assert runtime.closed
     assert manager.evidence()["live_mapping_count"] == 0
     assert manager.evidence()["mapping_count"] == 2
+
+
+def test_bootstrap_keeps_host_initialization_separate_from_communication(monkeypatch):
+    manager = BootstrapManager(attention_device=0, wse_device=1, run_id="run", generation=1)
+    with pytest.raises(BootstrapError, match="WSE Host"):
+        manager.launch_npu_host()
+
+    runtime = FakeRuntime()
+    local_manager = NpuDeviceMemoryManager(
+        endpoint_id="attention",
+        device_id=0,
+        generation=1,
+        runtime=runtime,
+    )
+    peer_manifest = WindowManifest(
+        "wse",
+        EndpointRole.WSE,
+        1,
+        1,
+        "wse-window",
+        WSE_WINDOW_BYTES,
+        WSE_WINDOW_BYTES,
+        88,
+    )
+    manager.channel = FakeControlChannel(peer_manifest)
+    manager._process_controller = object()
+    monkeypatch.setattr("pypto_test.bootstrap.NpuDeviceMemoryManager", lambda **kwargs: local_manager)
+
+    manager.launch_npu_host()
+    assert runtime.initialized
+    assert not hasattr(runtime, "local_window")
+
+    bundle = manager.build_communication()
+    assert runtime.local_window is not None
+    assert bundle.backend_kind == "WSE"
+    assert [item[0] for item in manager.channel.sent[:2]] == ["BUILD_COMMUNICATION", "MANIFEST"]
+    local_manager.release()

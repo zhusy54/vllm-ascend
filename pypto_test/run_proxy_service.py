@@ -1,44 +1,43 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Two-process launcher for the host-local NPU/WSE-surrogate prototype.
+"""Example entry point for the host-local NPU/WSE proxy service.
 
-``run_generation`` models the NPU Host service entry.  It asks Bootstrap to
+``run_proxy_service`` models the NPU Host service entry.  It asks Bootstrap to
 create the second Host process and data plane, then interacts only with
 PseudoPyptoDistributedService.  A complete normal generation is:
 
-    launch processes -> prepare communication -> initialize kernels
+    launch WSE Host -> launch NPU Host -> build communication -> initialize kernels
       -> execute synchronous requests -> health -> drain -> close
       -> Bootstrap release -> collect redacted evidence
 
-The child ``_surrogate_process`` contains the remote Host control loop.  It
+The child ``_wse_host_process`` contains the WSE Host control loop.  It
 starts and stops the B backend but does not receive per-request commands; the
 resident B kernel observes those directly in Device memory.
 """
 
 from __future__ import annotations
 
-import argparse
-import json
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from pypto_test.backend import NpuSurrogateBackend
+from pypto_test.backend import WseBackend
 from pypto_test.bootstrap import (
     BootstrapManager,
     ProxyControlChannel,
-    SurrogateDeviceMemoryManager,
-    accept_surrogate_bootstrap,
+    WseDeviceMemoryManager,
+    accept_wse_communication,
     connect_control_endpoint,
     open_control_listener,
 )
-from pypto_test.contracts import EndpointRole, deterministic_input, expected_abc
+from pypto_test.contracts import EndpointRole, ExecutionResult
 from pypto_test.service import PseudoPyptoDistributedService
 
 
-def _surrogate_process(
+def _wse_host_process(
     *,
     host: str,
     port: int,
@@ -50,7 +49,7 @@ def _surrogate_process(
     ready_event: Any,
     result_queue: Any,
 ) -> None:
-    """Run the surrogate Host's bootstrap and generation control endpoint."""
+    """Run the WSE Host bootstrap and service-lifecycle control endpoint."""
 
     listener = None
     connection = None
@@ -67,27 +66,32 @@ def _surrogate_process(
             connection = connect_control_endpoint(host, port)
             ready_event.set()
         channel = ProxyControlChannel(connection, run_id=run_id, generation=generation)
-        memory_manager = SurrogateDeviceMemoryManager(
-            endpoint_id="wse-surrogate",
+        memory_manager = WseDeviceMemoryManager(
+            endpoint_id="wse",
             device_id=device_id,
             generation=generation,
         )
-        # All surrogate ACL allocation/import calls occur locally in this child
-        # process.  Attention never invokes its Device Context across processes.
-        resources = accept_surrogate_bootstrap(channel=channel, memory_manager=memory_manager)
+        # Stage 1: initialize the WSE-side Device runtime without allocating or
+        # attaching communication memory, then report Host readiness.
+        memory_manager.initialize_runtime()
+        channel.send("WSE_HOST_READY", EndpointRole.WSE)
+
+        # Stage 3: wait until the NPU Host is also ready, then build the WSE
+        # half of the communication data plane in this process-local Context.
+        resources = accept_wse_communication(channel=channel, memory_manager=memory_manager)
 
         # START is the last Host control action before B becomes a resident
         # Device service.  No execute/task/payload message exists in this loop.
         message = channel.receive("START", EndpointRole.ATTENTION)
         del message
-        backend = NpuSurrogateBackend(
+        backend = WseBackend(
             execution_port=resources.execution_port,
             local_window=resources.local_window,
             npu_peer_window=resources.npu_peer_window,
             kernel_binary=Path(kernel_binary),
         )
         ready = backend.initialize()
-        channel.send("READY", EndpointRole.WSE_SURROGATE, details=ready)
+        channel.send("READY", EndpointRole.WSE, details=ready)
         drain_evidence: dict[str, Any] | None = None
         # Generation control state machine:
         #   START/READY -> HEALTH* -> DRAIN/DRAINED -> CLOSE/CLOSED
@@ -97,18 +101,18 @@ def _surrogate_process(
             message = channel.receive_any(EndpointRole.ATTENTION)
             message_type = message["type"]
             if message_type == "HEALTH":
-                channel.send("HEALTH_REPLY", EndpointRole.WSE_SURROGATE, details=backend.health())
+                channel.send("HEALTH_REPLY", EndpointRole.WSE, details=backend.health())
             elif message_type == "DRAIN":
                 drain_evidence = backend.drain()
-                channel.send("DRAINED", EndpointRole.WSE_SURROGATE, details=drain_evidence)
+                channel.send("DRAINED", EndpointRole.WSE, details=drain_evidence)
             elif message_type == "CLOSE":
                 backend.close()
-                channel.send("CLOSED", EndpointRole.WSE_SURROGATE)
+                channel.send("CLOSED", EndpointRole.WSE)
             elif message_type == "RELEASE":
                 # Backend close was acknowledged before this branch, so no
                 # Device stream can still access either VMM mapping.
                 memory_manager.release()
-                channel.send("RELEASED", EndpointRole.WSE_SURROGATE)
+                channel.send("RELEASED", EndpointRole.WSE)
                 result_queue.put(
                     {
                         "backend": drain_evidence,
@@ -119,7 +123,7 @@ def _surrogate_process(
                 )
                 break
             else:
-                raise RuntimeError(f"unexpected surrogate control message: {message_type}")
+                raise RuntimeError(f"unexpected WSE control message: {message_type}")
     except BaseException as exc:
         result_queue.put({"error": f"{type(exc).__name__}: {exc}", "status": "FAIL"})
         raise
@@ -136,75 +140,63 @@ def _surrogate_process(
             listener.close()
 
 
-def run_generation(
+def run_proxy_service(
     *,
     attention_device: int,
-    surrogate_device: int,
+    wse_device: int,
     generation: int,
-    element_counts: list[int],
+    input_payloads: list[bytes],
     start_order: str,
     kernel_dir: Path,
+    result_handler: Callable[[bytes, ExecutionResult], None] | None = None,
 ) -> dict[str, Any]:
-    """Execute one complete service generation and return measured evidence.
+    """Execute one complete proxy-service lifecycle and return measured evidence.
 
     This function represents the upper software layer: after Bootstrap returns
     a bundle it uses only the five proxy APIs.  It never reaches into the
-    surrogate process, transport implementation, or communication allocator.
+    WSE Host process, transport implementation, or communication allocator.
     """
 
     run_id = f"proxy-{uuid4().hex}"
-    # Bootstrap owns process construction and connection lifetime.  ``spawn``
-    # ensures the surrogate begins without an inherited ACL Device Context.
-    bootstrap = BootstrapManager.launch_surrogate(
-        endpoint_target=_surrogate_process,
-        start_order=start_order,
+    # Bootstrap owns both Host initialization and all communication resources.
+    # ``spawn`` ensures the WSE Host begins without an inherited ACL Context.
+    with BootstrapManager(
         attention_device=attention_device,
-        surrogate_device=surrogate_device,
+        wse_device=wse_device,
         generation=generation,
         run_id=run_id,
-        kernel_binary=kernel_dir / "b_service.o",
-    )
-    service = None
-    try:
-        # Communication must be fully attached before either resident kernel is
-        # launched, because their arguments include imported peer addresses.
-        bundle = bootstrap.prepare()
+    ) as bootstrap:
+        bootstrap.launch_wse_host(
+            endpoint_target=_wse_host_process,
+            kernel_binary=kernel_dir / "b_service.o",
+            start_order=start_order,
+        )
+        bootstrap.launch_npu_host()
+        bundle = bootstrap.build_communication()
         service = PseudoPyptoDistributedService(bundle, driver_binary=kernel_dir / "abc_driver.o")
         initialization = service.initialize()
-        executions = []
-        for request_id, element_count in enumerate(element_counts, start=1):
-            # Different generation/request seeds make stale-slot reuse visible.
-            payload = deterministic_input(
-                generation=generation,
-                request_id=request_id,
-                element_count=element_count,
-            )
-            result = service.execute(payload)
-            # The CPU expression is an oracle checked only after final result
-            # return; it does not participate in Device task progression.
-            if result.output != expected_abc(payload):
-                raise RuntimeError(f"request {request_id} output does not match 2*x+5")
-            executions.append(
-                {
-                    "element_count": result.element_count,
-                    "final_control_d2h_bytes": result.final_control_d2h_bytes,
-                    "final_payload_d2h_bytes": result.final_payload_d2h_bytes,
-                    "final_signal_poll_reads": result.final_signal_poll_reads,
-                    "output_checksum": result.output_checksum,
-                    "request_id": result.request_id,
-                    "sequence": result.sequence,
-                }
-            )
+        request_count = 0
+        input_bytes = 0
+        output_bytes = 0
+        for input_payload in input_payloads:
+            result = service.execute(input_payload)
+            if result_handler is not None:
+                # Result interpretation belongs to the caller.  The core run
+                # path only returns C output and never imports a test oracle.
+                result_handler(input_payload, result)
+            request_count += 1
+            input_bytes += len(input_payload)
+            output_bytes += len(result.output)
         health = service.health()
         drain = service.drain()
         service.close()
         service_evidence = service.evidence()
         # Physical communication resources outlive service.close and are
         # released only after its lease is QUIESCED.
-        surrogate_evidence = bootstrap.release()
+        wse_evidence = bootstrap.release()
         return {
             "bootstrap": bootstrap.evidence(),
-            "devices": {"attention": attention_device, "wse_surrogate": surrogate_device},
+            "devices": {"attention": attention_device, "wse": wse_device},
             "endpoint_bundle": {
                 "backend_kind": bundle.backend_kind,
                 "generation": bundle.generation,
@@ -214,51 +206,19 @@ def run_generation(
                 "transport_kind": bundle.transport_kind,
                 "transport_scope": bundle.transport_scope,
             },
-            "executions": executions,
+            "execution_summary": {
+                "input_bytes": input_bytes,
+                "output_bytes": output_bytes,
+                "request_count": request_count,
+            },
             "generation": generation,
             "health": health,
             "initialization": initialization,
             "run_id": run_id,
-            "resident_kernel_launches": {"attention": 1, "wse_surrogate": 1},
+            "resident_kernel_launches": {"attention": 1, "wse": 1},
             "service": service_evidence,
             "start_order": start_order,
             "status": "PASS",
-            "surrogate": surrogate_evidence,
+            "wse": wse_evidence,
             "teardown": drain,
         }
-    finally:
-        bootstrap.abort()
-
-
-def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--attention-device", type=int, required=True)
-    parser.add_argument("--surrogate-device", type=int, required=True)
-    parser.add_argument("--generation", type=int, default=1)
-    parser.add_argument("--elements", type=int, nargs="*", default=[1024])
-    parser.add_argument("--start-order", choices=("attention-first", "wse-first"), default="attention-first")
-    parser.add_argument("--kernel-dir", type=Path, default=Path(__file__).parent / "build")
-    parser.add_argument("--output", type=Path)
-    return parser.parse_args()
-
-
-def main() -> int:
-    args = _parse_args()
-    evidence = run_generation(
-        attention_device=args.attention_device,
-        surrogate_device=args.surrogate_device,
-        generation=args.generation,
-        element_counts=args.elements,
-        start_order=args.start_order,
-        kernel_dir=args.kernel_dir,
-    )
-    encoded = json.dumps(evidence, indent=2, sort_keys=True)
-    if args.output is not None:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(encoded + "\n")
-    print(encoded)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

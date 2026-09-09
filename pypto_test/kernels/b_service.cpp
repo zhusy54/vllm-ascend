@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 // This file is a part of the vllm-ascend project.
 
-// Resident NPU surrogate for the future WSE-side fixed B task.
+// Resident second-NPU implementation of the WSE-side fixed B task.
 //
 // This kernel validates the interface expected from a future WSE backend while
 // still running on a second Ascend NPU.  It is launched once per generation:
@@ -12,7 +12,7 @@
 //     -> write B output to remote_b_output (Attention-owned VMM window)
 //     -> publish B completion directly to the Attention Device
 //
-// The surrogate Host handles only lifecycle RPC.  It does not receive an
+// The WSE Host handles only lifecycle RPC.  It does not receive an
 // execute call, copy A/B payloads, or forward the completion.
 #include "cce_aicore_intrinsics.h"
 #include <stdint.h>
@@ -146,8 +146,8 @@ extern "C" __global__ __aicore__ void pypto_b_service_0_mix_aiv(
     }
     ++report.accepted;
 
-    // Stage B reads surrogate-owned local HBM and writes its output through an
-    // imported mapping of Attention HBM.  This Store32 loop is the surrogate
+    // Stage B reads WSE-owned local HBM and writes its output through an
+    // imported mapping of Attention HBM.  This Store32 loop is the WSE-side
     // ->NPU Device data path being validated.
     uint64_t input_checksum = 0;
     uint64_t output_checksum = 0;

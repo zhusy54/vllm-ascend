@@ -3,7 +3,7 @@
 
 """Bootstrap-owned process, device-memory, and control-plane implementation.
 
-For each generation the Attention Host and surrogate Host are independent
+For each generation the Attention Host and WSE Host are independent
 processes, each with its own ACL Device Context.  Bootstrap coordinates this
 sequence:
 
@@ -20,7 +20,7 @@ Device notifications use only the VMM P2P data plane established here.
 
 BootstrapManager is the logical owner of the whole generation.  Physical ACL
 operations still execute in the process that owns the relevant Device Context,
-through NpuDeviceMemoryManager or SurrogateDeviceMemoryManager.
+through NpuDeviceMemoryManager or WseDeviceMemoryManager.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import struct
 import time
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
@@ -51,7 +51,6 @@ from pypto_test.contracts import (
     EndpointRole,
     KernelSession,
     LeaseState,
-    MemoryOperationAudit,
 )
 from tools.pypto_wse_validation.acl_kernel import AclDeviceKernel
 from tools.pypto_wse_validation.acl_vmm import AclVmmRuntime, VmmExport
@@ -65,6 +64,8 @@ _MESSAGE_TYPES = frozenset(
     {
         "MANIFEST",
         "ATTACHED",
+        "WSE_HOST_READY",
+        "BUILD_COMMUNICATION",
         "START",
         "READY",
         "HEALTH",
@@ -82,6 +83,19 @@ _MESSAGE_TYPES = frozenset(
 
 class BootstrapError(RuntimeError):
     """Raised when bootstrap ownership or protocol rules are violated."""
+
+
+@dataclass
+class MemoryOperationAudit:
+    """Internal trace proving that Bootstrap performed every VMM operation."""
+
+    operations: list[dict[str, Any]] = field(default_factory=list)
+
+    def record(self, *, actor: str, operation: str, buffer_id: str) -> None:
+        self.operations.append({"actor": actor, "buffer_id": buffer_id, "operation": operation})
+
+    def to_dict(self) -> list[dict[str, Any]]:
+        return [dict(item) for item in self.operations]
 
 
 class _OwnedWindow(Protocol):
@@ -381,28 +395,34 @@ class DeviceMemoryManager:
         self.device_id = device_id
         self.generation = generation
         self.logical_bytes = logical_bytes
-        self.audit = audit if audit is not None else MemoryOperationAudit()
+        self._audit = audit if audit is not None else MemoryOperationAudit()
         self._runtime = runtime if runtime is not None else AclVmmRuntime(device_id)
         self._local: _OwnedWindow | None = None
         self._peer: _ImportedWindow | None = None
         self._port: BorrowedDeviceExecutionPort | None = None
         self._closed = False
+        self._runtime_initialized = False
         self._allocated_window_count = 0
         self._mapping_count = 0
 
-    def initialize(self) -> WindowManifest:
-        """Create the local Context/window and export its physical handle."""
+    def initialize_runtime(self) -> None:
+        """Initialize only the endpoint-local Device runtime and Context."""
 
-        if self._closed or self._local is not None:
-            raise BootstrapError("memory manager cannot initialize in its current state")
-        # Context creation and owned HBM allocation are local physical actions.
-        # The returned manifest is only a description for the peer process.
+        if self._closed or self._runtime_initialized:
+            raise BootstrapError("runtime cannot initialize in its current state")
         self._runtime.initialize()
-        self.audit.record(actor=self.__class__.__name__, operation="runtime_initialize", buffer_id=self.endpoint_id)
+        self._runtime_initialized = True
+        self._audit.record(actor=self.__class__.__name__, operation="runtime_initialize", buffer_id=self.endpoint_id)
+
+    def allocate_window(self) -> WindowManifest:
+        """Allocate communication memory after both Host runtimes are ready."""
+
+        if self._closed or not self._runtime_initialized or self._local is not None:
+            raise BootstrapError("communication window cannot allocate in its current state")
         self._local = self._runtime.allocate_window(self.logical_bytes)
         self._allocated_window_count += 1
         self._mapping_count += 1
-        self.audit.record(actor=self.__class__.__name__, operation="allocate", buffer_id=self.local_buffer_id)
+        self._audit.record(actor=self.__class__.__name__, operation="allocate", buffer_id=self.local_buffer_id)
         export = self._local.export
         return WindowManifest(
             endpoint_id=self.endpoint_id,
@@ -433,7 +453,7 @@ class DeviceMemoryManager:
         exported = VmmExport(peer.device_id, peer.mapping_bytes, peer.shareable_handle)
         self._peer = self._runtime.import_window(exported, peer_device_id=peer.device_id)
         self._mapping_count += 1
-        self.audit.record(actor=self.__class__.__name__, operation="attach", buffer_id=peer.buffer_id)
+        self._audit.record(actor=self.__class__.__name__, operation="attach", buffer_id=peer.buffer_id)
 
     def borrowed_resources(
         self, peer: WindowManifest
@@ -480,19 +500,19 @@ class DeviceMemoryManager:
             self._port.invalidate()
         if self._peer is not None:
             self._peer.close()
-            self.audit.record(actor=self.__class__.__name__, operation="detach", buffer_id="peer-window")
+            self._audit.record(actor=self.__class__.__name__, operation="detach", buffer_id="peer-window")
             self._peer = None
         if self._local is not None:
             self._local.close()
-            self.audit.record(actor=self.__class__.__name__, operation="free", buffer_id=self.local_buffer_id)
+            self._audit.record(actor=self.__class__.__name__, operation="free", buffer_id=self.local_buffer_id)
             self._local = None
         self._runtime.close()
-        self.audit.record(actor=self.__class__.__name__, operation="runtime_close", buffer_id=self.endpoint_id)
+        self._audit.record(actor=self.__class__.__name__, operation="runtime_close", buffer_id=self.endpoint_id)
         self._closed = True
 
     def evidence(self) -> dict[str, Any]:
         return {
-            "audit": self.audit.to_dict(),
+            "audit": self._audit.to_dict(),
             "device_id": self.device_id,
             "endpoint_id": self.endpoint_id,
             "generation": self.generation,
@@ -509,13 +529,13 @@ class NpuDeviceMemoryManager(DeviceMemoryManager):
         super().__init__(role=EndpointRole.ATTENTION, logical_bytes=NPU_WINDOW_BYTES, **kwargs)
 
 
-class SurrogateDeviceMemoryManager(DeviceMemoryManager):
+class WseDeviceMemoryManager(DeviceMemoryManager):
     def __init__(self, **kwargs: Any) -> None:
-        super().__init__(role=EndpointRole.WSE_SURROGATE, logical_bytes=WSE_WINDOW_BYTES, **kwargs)
+        super().__init__(role=EndpointRole.WSE, logical_bytes=WSE_WINDOW_BYTES, **kwargs)
 
 
 class RemoteWseServiceControl:
-    """Attention-side generation control stub for the surrogate Host process."""
+    """Attention-side lifecycle control stub for the WSE Host process."""
 
     def __init__(self, channel: ProxyControlChannel) -> None:
         self._channel = channel
@@ -523,25 +543,25 @@ class RemoteWseServiceControl:
 
     def start(self) -> dict[str, Any]:
         self._channel.send("START", EndpointRole.ATTENTION)
-        return self._channel.receive("READY", EndpointRole.WSE_SURROGATE)
+        return self._channel.receive("READY", EndpointRole.WSE)
 
     def health(self) -> dict[str, Any]:
         self._channel.send("HEALTH", EndpointRole.ATTENTION)
-        return self._channel.receive("HEALTH_REPLY", EndpointRole.WSE_SURROGATE)
+        return self._channel.receive("HEALTH_REPLY", EndpointRole.WSE)
 
     def drain(self) -> dict[str, Any]:
         self._channel.send("DRAIN", EndpointRole.ATTENTION)
-        return self._channel.receive("DRAINED", EndpointRole.WSE_SURROGATE)
+        return self._channel.receive("DRAINED", EndpointRole.WSE)
 
     def close(self) -> None:
         if self._closed:
             return
         self._channel.send("CLOSE", EndpointRole.ATTENTION)
-        self._channel.receive("CLOSED", EndpointRole.WSE_SURROGATE)
+        self._channel.receive("CLOSED", EndpointRole.WSE)
         self._closed = True
 
 
-class SurrogateProcessController:
+class WseHostProcessController:
     """Bootstrap-owned lifetime handle for the remote Host process.
 
     Keeping join/termination and its evidence queue here means Launcher does
@@ -562,13 +582,13 @@ class SurrogateProcessController:
         if self.process.is_alive():
             self.process.terminate()
             self.process.join(10)
-            raise BootstrapError("surrogate process did not exit")
+            raise BootstrapError("WSE Host process did not exit")
         try:
             result = self.result_queue.get(timeout=5)
         except queue.Empty as exc:
-            raise BootstrapError("surrogate process returned no evidence") from exc
+            raise BootstrapError("WSE Host process returned no evidence") from exc
         if self.process.exitcode != 0 or result.get("status") != "PASS":
-            raise BootstrapError(f"surrogate process failed: {result}")
+            raise BootstrapError(f"WSE Host process failed: {result}")
         self.connection.close()
         self._result = result
         return dict(result)
@@ -581,8 +601,8 @@ class SurrogateProcessController:
 
 
 @dataclass(frozen=True)
-class SurrogateBootstrapResources:
-    """Borrowed capabilities handed to the surrogate backend after attach."""
+class WseBootstrapResources:
+    """Borrowed capabilities handed to the WSE backend after attach."""
 
     local_window: BorrowedWindowView
     npu_peer_window: BorrowedWindowView
@@ -601,77 +621,105 @@ class BootstrapManager:
     def __init__(
         self,
         *,
-        channel: ProxyControlChannel,
-        memory_manager: NpuDeviceMemoryManager,
+        attention_device: int,
+        wse_device: int,
         run_id: str,
         generation: int,
-        process_controller: SurrogateProcessController | None = None,
     ) -> None:
-        self.channel = channel
-        self.memory_manager = memory_manager
+        self.attention_device = attention_device
+        self.wse_device = wse_device
         self.run_id = run_id
         self.generation = generation
+        self.channel: ProxyControlChannel | None = None
+        self.memory_manager: NpuDeviceMemoryManager | None = None
         self._lease: BootstrapLease | None = None
         self._lifecycle_events: list[str] = []
-        self._process_controller = process_controller
-        self._surrogate_evidence: dict[str, Any] | None = None
+        self._process_controller: WseHostProcessController | None = None
+        self._wse_evidence: dict[str, Any] | None = None
 
-    @classmethod
-    def launch_surrogate(
-        cls,
+    def __enter__(self) -> BootstrapManager:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.abort()
+
+    def launch_wse_host(
+        self,
         *,
         endpoint_target: Any,
-        attention_device: int,
-        surrogate_device: int,
-        generation: int,
-        run_id: str,
         kernel_binary: Path,
         start_order: str,
-    ) -> BootstrapManager:
-        """Start the remote Host and construct the Attention-side coordinator."""
+    ) -> None:
+        """Start the WSE Host and complete its non-communication initialization."""
+
+        if self._process_controller is not None or self.channel is not None:
+            raise BootstrapError("WSE Host is already launched")
 
         # Process creation happens before either ACL runtime is initialized.
         # This avoids inheriting a live Device Context into the child process.
-        connection, process, result_queue = _launch_surrogate_process(
-            endpoint_target=endpoint_target,
-            start_order=start_order,
-            device_id=surrogate_device,
-            generation=generation,
-            run_id=run_id,
-            kernel_binary=kernel_binary,
-        )
-        channel = ProxyControlChannel(connection, run_id=run_id, generation=generation)
+        try:
+            connection, process, result_queue = _launch_wse_host_process(
+                endpoint_target=endpoint_target,
+                start_order=start_order,
+                device_id=self.wse_device,
+                generation=self.generation,
+                run_id=self.run_id,
+                kernel_binary=kernel_binary,
+            )
+            self.channel = ProxyControlChannel(connection, run_id=self.run_id, generation=self.generation)
+            self._process_controller = WseHostProcessController(connection, process, result_queue)
+            self.channel.receive("WSE_HOST_READY", EndpointRole.WSE)
+            self._lifecycle_events.append("wse_host_ready")
+        except BaseException:
+            self.abort()
+            raise
+
+    def launch_npu_host(self) -> None:
+        """Initialize the Attention Host's local Device runtime and Context."""
+
+        if self._process_controller is None or self.channel is None:
+            raise BootstrapError("WSE Host must be launched before NPU Host")
+        if self.memory_manager is not None:
+            raise BootstrapError("NPU Host is already launched")
         memory_manager = NpuDeviceMemoryManager(
             endpoint_id="attention",
-            device_id=attention_device,
-            generation=generation,
+            device_id=self.attention_device,
+            generation=self.generation,
         )
-        return cls(
-            channel=channel,
-            memory_manager=memory_manager,
-            run_id=run_id,
-            generation=generation,
-            process_controller=SurrogateProcessController(connection, process, result_queue),
-        )
+        try:
+            memory_manager.initialize_runtime()
+        except BaseException:
+            memory_manager.release()
+            raise
+        self.memory_manager = memory_manager
+        self._lifecycle_events.append("npu_host_ready")
 
-    def prepare(self) -> EndpointBundle:
+    def build_communication(self) -> EndpointBundle:
         """Build the bidirectional P2P data plane and lend its capabilities."""
+
+        if self.channel is None or self._process_controller is None:
+            raise BootstrapError("WSE Host must be launched before communication")
+        if self.memory_manager is None:
+            raise BootstrapError("NPU Host must be launched before communication")
+        if self._lease is not None:
+            raise BootstrapError("communication is already built")
 
         # Phase 1: allocate the Attention-owned window and exchange both raw
         # manifests.  Both peers send first, so either startup order converges
         # on the same protocol state without designating a data-plane server.
-        local_manifest = self.memory_manager.initialize()
+        local_manifest = self.memory_manager.allocate_window()
+        self.channel.send("BUILD_COMMUNICATION", EndpointRole.ATTENTION)
         self.channel.send("MANIFEST", EndpointRole.ATTENTION, manifest=local_manifest.to_dict())
-        message = self.channel.receive("MANIFEST", EndpointRole.WSE_SURROGATE)
+        message = self.channel.receive("MANIFEST", EndpointRole.WSE)
         peer_manifest = WindowManifest.from_dict(message["manifest"])
         peer_manifest.validate(generation=self.generation)
 
-        # Phase 2: import the surrogate allocation locally.  ATTACHED is a
+        # Phase 2: import the WSE allocation locally.  ATTACHED is a
         # rendezvous barrier: no resident kernel is launched until both peers
         # report that their peer mapping exists.
         self.memory_manager.attach(peer_manifest)
         self.channel.send("ATTACHED", EndpointRole.ATTENTION)
-        self.channel.receive("ATTACHED", EndpointRole.WSE_SURROGATE)
+        self.channel.receive("ATTACHED", EndpointRole.WSE)
 
         # Phase 3: expose only borrowed capabilities.  The lease ties every
         # address and execution operation to this immutable generation.
@@ -679,11 +727,11 @@ class BootstrapManager:
         lease = BootstrapLease(f"lease-{uuid4().hex}", self.generation)
         lease.borrow()
         self._lease = lease
-        self._lifecycle_events.extend(("resources_prepared", "lease_borrowed"))
+        self._lifecycle_events.extend(("communication_built", "lease_borrowed"))
         bundle = EndpointBundle(
             generation=self.generation,
             endpoint_id=local_manifest.endpoint_id,
-            backend_kind="NPU_SURROGATE",
+            backend_kind="WSE",
             transport_kind="ASCEND_VMM_P2P",
             transport_scope="HOST_LOCAL",
             layout=DEFAULT_LAYOUT,
@@ -699,61 +747,63 @@ class BootstrapManager:
     def release(self) -> dict[str, Any] | None:
         """Release both endpoints only after the proxy has quiesced its lease."""
 
-        if self._lease is None:
-            raise BootstrapError("bootstrap resources were not prepared")
+        if self._lease is None or self.channel is None or self.memory_manager is None:
+            raise BootstrapError("bootstrap communication was not built")
         if self._lease.state is not LeaseState.QUIESCED:
             raise BootstrapError("service must quiesce its lease before bootstrap release")
         # The remote backend and binary were already closed by service.close().
         # Release the remote mapping/window first, then the Attention side, and
         # mark the lease RELEASED only after both physical owners acknowledge.
         self.channel.send("RELEASE", EndpointRole.ATTENTION)
-        self.channel.receive("RELEASED", EndpointRole.WSE_SURROGATE)
-        self._lifecycle_events.append("surrogate_released")
+        self.channel.receive("RELEASED", EndpointRole.WSE)
+        self._lifecycle_events.append("wse_released")
         self.memory_manager.release()
         self._lease.release()
         self._lifecycle_events.extend(("attention_released", "lease_released"))
         if self._process_controller is not None:
-            self._surrogate_evidence = self._process_controller.collect()
-        return self._surrogate_evidence
+            self._wse_evidence = self._process_controller.collect()
+        return self._wse_evidence
 
     def abort(self) -> None:
         if self._process_controller is not None:
             self._process_controller.abort()
-        self.memory_manager.release()
+        if self.memory_manager is not None:
+            self.memory_manager.release()
 
     def evidence(self) -> dict[str, Any]:
         return {
-            "control": self.channel.evidence(),
+            "control": self.channel.evidence() if self.channel is not None else None,
             "lease_id": self._lease.lease_id if self._lease is not None else None,
             "lease_state": self._lease.state.value if self._lease is not None else None,
             "lifecycle_events": list(self._lifecycle_events),
-            "memory": self.memory_manager.evidence(),
+            "memory": self.memory_manager.evidence() if self.memory_manager is not None else None,
             "run_id": self.run_id,
         }
 
 
-def accept_surrogate_bootstrap(
+def accept_wse_communication(
     *,
     channel: ProxyControlChannel,
-    memory_manager: SurrogateDeviceMemoryManager,
-) -> SurrogateBootstrapResources:
-    """Perform the mirror image of ``BootstrapManager.prepare`` remotely."""
+    memory_manager: WseDeviceMemoryManager,
+) -> WseBootstrapResources:
+    """Build the WSE half of the data plane after both Hosts are ready."""
 
-    # This function runs inside the surrogate process, so all ACL calls below
-    # operate on the surrogate's own Device Context rather than by cross-Host
+    # This function runs inside the WSE process, so all ACL calls below
+    # operate on the WSE Host's Device Context rather than by cross-Host
     # invocation from the Attention process.
-    local_manifest = memory_manager.initialize()
-    channel.send("MANIFEST", EndpointRole.WSE_SURROGATE, manifest=local_manifest.to_dict())
+    channel.receive("BUILD_COMMUNICATION", EndpointRole.ATTENTION)
+    local_manifest = memory_manager.allocate_window()
+    channel.send("MANIFEST", EndpointRole.WSE, manifest=local_manifest.to_dict())
     message = channel.receive("MANIFEST", EndpointRole.ATTENTION)
     peer_manifest = WindowManifest.from_dict(message["manifest"])
     memory_manager.attach(peer_manifest)
     channel.receive("ATTACHED", EndpointRole.ATTENTION)
-    channel.send("ATTACHED", EndpointRole.WSE_SURROGATE)
+    channel.send("ATTACHED", EndpointRole.WSE)
     local, peer, port = memory_manager.borrowed_resources(peer_manifest)
-    return SurrogateBootstrapResources(local, peer, port, peer_manifest)
+    return WseBootstrapResources(local, peer, port, peer_manifest)
 
 
-def _launch_surrogate_process(
+def _launch_wse_host_process(
     *,
     endpoint_target: Any,
     start_order: str,
@@ -769,12 +819,12 @@ def _launch_surrogate_process(
     ready_event = context.Event()
     result_queue = context.Queue()
     if start_order == "attention-first":
-        # Attention creates the listener before the surrogate process exists.
+        # Attention creates the listener before the WSE Host process exists.
         listener = open_control_listener(DEFAULT_CONTROL_HOST, 0)
         port = listener.getsockname()[1]
         listens = False
     elif start_order == "wse-first":
-        # Reserve a free port, then let the surrogate become the listener.  The
+        # Reserve a free port, then let the WSE Host become the listener.  The
         # event prevents Attention from racing the child's bind/listen step.
         reservation = open_control_listener(DEFAULT_CONTROL_HOST, 0)
         port = reservation.getsockname()[1]
@@ -796,15 +846,30 @@ def _launch_surrogate_process(
             "result_queue": result_queue,
             "run_id": run_id,
         },
-        name=f"pypto-wse-surrogate-g{generation}",
+        name=f"pypto-wse-host-g{generation}",
     )
     process.start()
-    if listener is not None:
-        connection, _ = listener.accept()
-        listener.close()
-        connection.settimeout(DEFAULT_CONNECT_TIMEOUT_SECONDS)
-    else:
-        if not ready_event.wait(DEFAULT_CONNECT_TIMEOUT_SECONDS):
-            raise BootstrapError("surrogate listener did not become ready")
-        connection = connect_control_endpoint(DEFAULT_CONTROL_HOST, port)
-    return connection, process, result_queue
+    connection = None
+    try:
+        if listener is not None:
+            connection, _ = listener.accept()
+            listener.close()
+            listener = None
+            connection.settimeout(DEFAULT_CONNECT_TIMEOUT_SECONDS)
+        else:
+            if not ready_event.wait(DEFAULT_CONNECT_TIMEOUT_SECONDS):
+                raise BootstrapError("WSE Host listener did not become ready")
+            connection = connect_control_endpoint(DEFAULT_CONTROL_HOST, port)
+        return connection, process, result_queue
+    except BaseException:
+        # Process construction is part of launch_wse_host().  If connection
+        # setup fails before a controller can be returned, clean it up here so
+        # the outer Bootstrap context never loses ownership of a child.
+        if connection is not None:
+            connection.close()
+        if listener is not None:
+            listener.close()
+        if process.is_alive():
+            process.terminate()
+            process.join(10)
+        raise

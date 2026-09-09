@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import struct
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -44,7 +44,7 @@ DEFAULT_POLL_INTERVAL_SECONDS = 0.001
 #   +----------------------+ NPU_INPUT_OFFSET
 #   | Host input / A input |
 #   +----------------------+ NPU_B_OUTPUT_OFFSET
-#   | B output / C input   |  written remotely by the surrogate Device
+#   | B output / C input   |  written remotely by the WSE-side Device
 #   +----------------------+ NPU_FINAL_OUTPUT_OFFSET
 #   | C output             |  read by Host only after final completion
 #   +----------------------+ NPU_CONTROL_OFFSET
@@ -64,11 +64,11 @@ NPU_LIFECYCLE_OFFSET = NPU_CONTROL_OFFSET + (6 * CACHE_LINE_BYTES)
 NPU_REPORT_OFFSET = NPU_CONTROL_OFFSET + (7 * CACHE_LINE_BYTES)
 NPU_WINDOW_BYTES = NPU_CONTROL_OFFSET + (10 * CACHE_LINE_BYTES)
 
-# The surrogate-owned window needs only the A output/B input payload and the B
+# The WSE-owned window needs only the A output/B input payload and the B
 # submission control.  B writes its output and completion directly into the
-# imported Attention window, so there is no surrogate-Host result buffer.
+# imported Attention window, so there is no WSE-Host result buffer.
 #
-#   surrogate window
+#   WSE window
 #   +----------------------+ WSE_B_INPUT_OFFSET
 #   | A output / B input   |  written remotely by the Attention Device
 #   +----------------------+ WSE_CONTROL_OFFSET
@@ -96,7 +96,7 @@ class ServiceError(RuntimeError):
 
 class EndpointRole(str, Enum):
     ATTENTION = "ATTENTION"
-    WSE_SURROGATE = "WSE_SURROGATE"
+    WSE = "WSE"
 
 
 class ServiceState(str, Enum):
@@ -312,8 +312,8 @@ class EndpointBundle:
             raise ContractError("generation must be positive")
         if not self.endpoint_id:
             raise ContractError("endpoint_id must be non-empty")
-        if self.backend_kind != "NPU_SURROGATE":
-            raise ContractError("only NPU_SURROGATE backend is supported")
+        if self.backend_kind != "WSE":
+            raise ContractError("only the WSE backend is supported")
         if self.transport_scope != "HOST_LOCAL":
             raise ContractError("only HOST_LOCAL transport scope is supported")
         if self.execution_port.generation != self.generation:
@@ -511,7 +511,7 @@ class DriverReport:
 
 @dataclass(frozen=True)
 class ServiceReport:
-    """Device-written counters proving the surrogate accepted and ran B."""
+    """Device-written counters proving the WSE-side Device accepted and ran B."""
 
     accepted: int
     completed: int
@@ -555,49 +555,11 @@ class ExecutionResult:
     final_payload_d2h_bytes: int
 
 
-@dataclass
-class MemoryOperationAudit:
-    """Records which Bootstrap-local owner performed each VMM operation."""
-
-    operations: list[dict[str, Any]] = field(default_factory=list)
-
-    def record(self, *, actor: str, operation: str, buffer_id: str) -> None:
-        self.operations.append({"actor": actor, "buffer_id": buffer_id, "operation": operation})
-
-    def actors(self) -> set[str]:
-        return {str(item["actor"]) for item in self.operations}
-
-    def to_dict(self) -> list[dict[str, Any]]:
-        return [dict(item) for item in self.operations]
-
-
 def checksum_u32(payload: bytes) -> int:
     """Return a deterministic validation checksum, not a production integrity code."""
 
     _validate_uint32_payload(payload)
     return sum(value[0] for value in struct.iter_unpack("<I", payload))
-
-
-def expected_abc(payload: bytes) -> bytes:
-    """CPU oracle for ``C(B(A(x))) == 2*x+5`` with uint32 wraparound."""
-
-    _validate_uint32_payload(payload)
-    values = (((value[0] + 1) * 2 + 3) & 0xFFFFFFFF for value in struct.iter_unpack("<I", payload))
-    return b"".join(struct.pack("<I", value) for value in values)
-
-
-def deterministic_input(*, generation: int, request_id: int, element_count: int) -> bytes:
-    """Make reproducible, generation/request-specific test input."""
-
-    if generation <= 0 or request_id <= 0:
-        raise ContractError("generation and request_id must be positive")
-    if element_count <= 0 or element_count > MAX_ELEMENTS:
-        raise ContractError(f"element_count must be in [1, {MAX_ELEMENTS}]")
-    values = (
-        ((generation * 0x9E3779B1) ^ (request_id * 0x85EBCA77) ^ (index * 0xC2B2AE3D)) & 0xFFFFFFFF
-        for index in range(element_count)
-    )
-    return b"".join(struct.pack("<I", value) for value in values)
 
 
 def _unpack_line(payload: bytes) -> tuple[int, ...]:

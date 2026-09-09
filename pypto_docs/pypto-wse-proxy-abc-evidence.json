@@ -1,20 +1,21 @@
 {
   "schema_version": 1,
-  "collected_at": "2026-09-09T06:12:42.466833+00:00",
+  "collected_at": "2026-09-09T07:59:10.979238+00:00",
   "status": "PASS",
   "scope": {
-    "backend": "NPU_SURROGATE",
+    "backend": "WSE",
     "devices": [0, 1],
     "host_count": 1,
     "pypto_compiler_scheduler": "NOT_VALIDATED",
     "real_wse": "NOT_VALIDATED",
+    "wse_device_implementation": "SECOND_NPU",
     "transport_scope": "HOST_LOCAL"
   },
   "kernel_sha256": {
-    "abc_driver.o": "b493bbfcd937d9bfa6eac489ec85ad2909727ac934a7d1be12849f1e341398e4",
-    "b_service.o": "1ce6ac848b89a55817742ca12460625453762aeaa7d853b31bfc50f52a733a09"
+    "abc_driver.o": "497632ec9bce626fdd6e8b25df782e26930dcba14d935a421f01274ca5aa642a",
+    "b_service.o": "440d19c3808c98a856aca1546f9dd8d02b68ce2b24505663ef9d529f0ef37990"
   },
-  "full_summary_sha256": "039e28b0ed9c177f2d1e8f2bb3f876c80a56b97a8d215db43defe0d24d4d9fdf",
+  "full_summary_sha256": "94cfc11907c9a782231707c2a0ba82a961c2abca8cab9d126f88ec817b832583",
   "invariants": {
     "allocated_windows_per_endpoint_generation": 1,
     "host_intermediate_bytes": 0,

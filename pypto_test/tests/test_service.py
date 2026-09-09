@@ -36,10 +36,9 @@ from pypto_test.contracts import (
     ServiceError,
     SignalLine,
     checksum_u32,
-    deterministic_input,
-    expected_abc,
 )
 from pypto_test.service import PseudoPyptoDistributedService
+from pypto_test.validation.validation_utils import expected_abc, get_input_payload
 
 
 class FakeKernel:
@@ -55,7 +54,7 @@ class FakeKernel:
 
 class FakeRemoteControl:
     def start(self):
-        return {"backend_kind": "NPU_SURROGATE"}
+        return {"backend_kind": "WSE"}
 
     def health(self):
         return {"ready": True}
@@ -141,13 +140,13 @@ def make_service():
     bundle = EndpointBundle(
         1,
         "attention",
-        "NPU_SURROGATE",
+        "WSE",
         "FAKE",
         "HOST_LOCAL",
         DEFAULT_LAYOUT,
         port,
         BorrowedWindowView(EndpointRole.ATTENTION, "npu", 1, base, 4 * 1024 * 1024, 4 * 1024 * 1024),
-        BorrowedWindowView(EndpointRole.WSE_SURROGATE, "wse", 1, 8_000_000, 2 * 1024 * 1024, 2 * 1024 * 1024),
+        BorrowedWindowView(EndpointRole.WSE, "wse", 1, 8_000_000, 2 * 1024 * 1024, 2 * 1024 * 1024),
         remote,
         lease,
     )
@@ -158,7 +157,7 @@ def test_service_runs_fixed_abc_with_no_host_intermediate_progress():
     service, port, lease = make_service()
     initialized = service.initialize()
     assert initialized["state"] == "READY"
-    payload = deterministic_input(generation=1, request_id=1, element_count=32)
+    payload = get_input_payload(generation=1, request_id=1, element_count=32)
     result = service.execute(payload)
     assert result.output == expected_abc(payload)
     request_submissions = [item for item in port.writes if item == (NPU_HOST_REQUEST_SIGNAL_OFFSET, 64)]
@@ -181,7 +180,7 @@ def test_service_rejects_second_request_while_busy():
     service, port, _ = make_service()
     service.initialize()
     port.auto_complete = False
-    payload = deterministic_input(generation=1, request_id=1, element_count=4)
+    payload = get_input_payload(generation=1, request_id=1, element_count=4)
     result = []
     worker = threading.Thread(target=lambda: result.append(service.execute(payload)))
     worker.start()

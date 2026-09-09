@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Host control backend for the resident surrogate B service.
+"""Host control backend for the resident WSE-side B service.
 
 The backend is deliberately absent from the per-request path.  Its Host-side
 job is to bind borrowed addresses into kernel arguments, launch one resident B
@@ -48,7 +48,7 @@ class BackendError(RuntimeError):
 
 
 class WseExecutionBackend(Protocol):
-    """Lifecycle capabilities required from a surrogate or real WSE backend."""
+    """Lifecycle capabilities required from the current or a real WSE backend."""
 
     backend_kind: str
 
@@ -64,7 +64,7 @@ class WseExecutionBackend(Protocol):
 class BServiceKernelArguments(ctypes.Structure):
     """Host ABI matching ``pypto_b_service_0_mix_aiv`` exactly.
 
-    The first five addresses belong to the surrogate-owned local window.  The
+    The first five addresses belong to the WSE-owned local window.  The
     next three are process-local mappings of the Attention-owned window, used
     by the Device to write B output and completion without a Host copy.
     """
@@ -83,15 +83,15 @@ class BServiceKernelArguments(ctypes.Structure):
     ]
 
 
-class NpuSurrogateBackend:
-    """Control-plane owner of a surrogate's resident B kernel, not its memory.
+class WseBackend:
+    """Control-plane owner of the WSE-side resident B kernel, not its memory.
 
     It receives only a narrow DeviceExecutionPort and borrowed window views;
     there is intentionally no MemoryManager reference or per-request execute
     method on this class.
     """
 
-    backend_kind = "NPU_SURROGATE"
+    backend_kind = "WSE"
 
     def __init__(
         self,
@@ -203,7 +203,7 @@ class NpuSurrogateBackend:
 class RealWseBackend:
     """Reserved lifecycle contract point for a future real WSE implementation.
 
-    Replacing the surrogate requires an equivalent Device data-plane attach,
+    Replacing the current second-NPU implementation requires an equivalent Device data-plane attach,
     B task launch/notification mechanism, health, drain, and close.  This
     placeholder prevents the current test from implying those are validated.
     """

@@ -29,7 +29,8 @@ from pathlib import Path
 from typing import Any
 
 from pypto_test.contracts import MAX_ELEMENTS
-from pypto_test.launcher import run_generation
+from pypto_test.run_proxy_service import run_proxy_service
+from pypto_test.validation.validation_utils import get_input_payload, return_result
 
 
 @dataclass(frozen=True)
@@ -71,17 +72,17 @@ class EvidenceError(RuntimeError):
 def validate_generation(evidence: dict[str, Any], *, expected_requests: int) -> None:
     """Fail closed unless execution, ownership, and cleanup all agree."""
 
-    # Scope checks prevent a passing surrogate run from being reported as real
-    # WSE or cross-Host evidence.
+    # Scope checks prevent a same-Host second-NPU run from being reported as
+    # real-WSE or cross-Host evidence.
     if evidence.get("status") != "PASS":
         raise EvidenceError("generation did not report PASS")
-    if len(evidence.get("executions", ())) != expected_requests:
+    if evidence.get("execution_summary", {}).get("request_count") != expected_requests:
         raise EvidenceError("request count mismatch")
     if evidence["endpoint_bundle"]["transport_scope"] != "HOST_LOCAL":
         raise EvidenceError("prototype must remain HOST_LOCAL")
-    if evidence["endpoint_bundle"]["backend_kind"] != "NPU_SURROGATE":
-        raise EvidenceError("prototype must use the NPU surrogate")
-    if evidence["resident_kernel_launches"] != {"attention": 1, "wse_surrogate": 1}:
+    if evidence["endpoint_bundle"]["backend_kind"] != "WSE":
+        raise EvidenceError("prototype must expose the WSE backend contract")
+    if evidence["resident_kernel_launches"] != {"attention": 1, "wse": 1}:
         raise EvidenceError("resident kernels were not launched exactly once")
 
     # A zero intermediate byte count is the observable Host-side assertion;
@@ -90,8 +91,8 @@ def validate_generation(evidence: dict[str, Any], *, expected_requests: int) -> 
     if traffic["host_intermediate_bytes"] != 0:
         raise EvidenceError("Host participated in the A/B/C intermediate path")
     driver_report = evidence["service"]["driver"]["report"]
-    surrogate_report = evidence["surrogate"]["backend"]["report"]
-    for report_name, report in (("driver", driver_report), ("surrogate", surrogate_report)):
+    wse_report = evidence["wse"]["backend"]["report"]
+    for report_name, report in (("driver", driver_report), ("wse", wse_report)):
         if report["accepted"] != expected_requests or report["completed"] != expected_requests:
             raise EvidenceError(f"{report_name} request counters mismatch")
         error_count = sum(value for key, value in report.items() if key.endswith("errors"))
@@ -99,13 +100,13 @@ def validate_generation(evidence: dict[str, Any], *, expected_requests: int) -> 
             raise EvidenceError(f"{report_name} reported {error_count} validation errors")
     if driver_report["a_runs"] != expected_requests or driver_report["c_runs"] != expected_requests:
         raise EvidenceError("A/C device run counters mismatch")
-    if surrogate_report["b_runs"] != expected_requests:
+    if wse_report["b_runs"] != expected_requests:
         raise EvidenceError("B device run counter mismatch")
 
     # Each endpoint has one owned mapping and one imported peer mapping during
     # execution.  Both must be gone by the time evidence is returned.
     memory = evidence["bootstrap"]["memory"]
-    remote_memory = evidence["surrogate"]["memory"]
+    remote_memory = evidence["wse"]["memory"]
     for endpoint in (memory, remote_memory):
         if endpoint["allocated_window_count"] != 1 or endpoint["mapping_count"] != 2:
             raise EvidenceError("bootstrap memory counts mismatch")
@@ -120,7 +121,7 @@ def run_case(
     case_id: str,
     start_order: str,
     attention_device: int,
-    surrogate_device: int,
+    wse_device: int,
     kernel_dir: Path,
 ) -> dict[str, Any]:
     """Run every generation required by one named validation case."""
@@ -128,13 +129,18 @@ def run_case(
     definition = CASE_DEFINITIONS[case_id]
     generations = []
     for generation in definition.generations:
-        evidence = run_generation(
+        input_payloads = [
+            get_input_payload(generation=generation, request_id=request_id, element_count=element_count)
+            for request_id, element_count in enumerate(definition.element_counts, start=1)
+        ]
+        evidence = run_proxy_service(
             attention_device=attention_device,
-            surrogate_device=surrogate_device,
+            wse_device=wse_device,
             generation=generation,
-            element_counts=list(definition.element_counts),
+            input_payloads=input_payloads,
             start_order=start_order,
             kernel_dir=kernel_dir,
+            result_handler=return_result,
         )
         validate_generation(evidence, expected_requests=len(definition.element_counts))
         generations.append(evidence)
@@ -158,7 +164,7 @@ def collect(
     *,
     matrix: tuple[tuple[str, str], ...],
     attention_device: int,
-    surrogate_device: int,
+    wse_device: int,
     kernel_dir: Path,
     artifact_dir: Path,
 ) -> dict[str, Any]:
@@ -171,7 +177,7 @@ def collect(
             case_id=case_id,
             start_order=start_order,
             attention_device=attention_device,
-            surrogate_device=surrogate_device,
+            wse_device=wse_device,
             kernel_dir=kernel_dir,
         )
         cases.append(result)
@@ -181,10 +187,11 @@ def collect(
         "cases": cases,
         "environment": _environment(),
         "scope": {
-            "backend": "NPU_SURROGATE",
+            "backend": "WSE",
             "host_count": 1,
             "pypto_compiler_scheduler": "NOT_VALIDATED",
             "transport_scope": "HOST_LOCAL",
+            "wse_device_implementation": "SECOND_NPU",
         },
         "status": "PASS",
     }
@@ -217,9 +224,10 @@ def _environment() -> dict[str, Any]:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--attention-device", type=int, required=True)
-    parser.add_argument("--surrogate-device", type=int, required=True)
-    parser.add_argument("--kernel-dir", type=Path, default=Path(__file__).parent / "build")
-    parser.add_argument("--artifact-dir", type=Path, default=Path(__file__).parent / "artifacts")
+    parser.add_argument("--wse-device", type=int, required=True)
+    prototype_dir = Path(__file__).parents[1]
+    parser.add_argument("--kernel-dir", type=Path, default=prototype_dir / "build")
+    parser.add_argument("--artifact-dir", type=Path, default=prototype_dir / "artifacts")
     parser.add_argument("--case", choices=tuple(CASE_DEFINITIONS), action="append")
     parser.add_argument("--start-order", choices=("attention-first", "wse-first"), default="attention-first")
     return parser.parse_args()
@@ -231,7 +239,7 @@ def main() -> int:
     summary = collect(
         matrix=matrix,
         attention_device=args.attention_device,
-        surrogate_device=args.surrogate_device,
+        wse_device=args.wse_device,
         kernel_dir=args.kernel_dir,
         artifact_dir=args.artifact_dir,
     )

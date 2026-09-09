@@ -32,9 +32,8 @@ from pypto_test.contracts import (
     ServiceReport,
     SignalLine,
     checksum_u32,
-    deterministic_input,
-    expected_abc,
 )
+from pypto_test.validation.validation_utils import expected_abc, get_input_payload
 
 
 def test_fixed_program_and_layout_are_stable():
@@ -84,9 +83,9 @@ def test_descriptor_rejects_invalid_element_count():
 
 
 def test_uint32_reference_is_deterministic_and_wraps():
-    payload = deterministic_input(generation=3, request_id=7, element_count=32)
-    assert payload == deterministic_input(generation=3, request_id=7, element_count=32)
-    assert payload != deterministic_input(generation=3, request_id=8, element_count=32)
+    payload = get_input_payload(generation=3, request_id=7, element_count=32)
+    assert payload == get_input_payload(generation=3, request_id=7, element_count=32)
+    assert payload != get_input_payload(generation=3, request_id=8, element_count=32)
     assert len(expected_abc(payload)) == len(payload)
     wrap = bytes.fromhex("ffffffff")
     assert expected_abc(wrap) == bytes.fromhex("03000000")
@@ -116,13 +115,13 @@ def test_endpoint_bundle_rejects_generation_and_released_lease():
     bundle = EndpointBundle(
         1,
         "attention",
-        "NPU_SURROGATE",
+        "WSE",
         "FAKE",
         "HOST_LOCAL",
         DEFAULT_LAYOUT,
         ContractFakePort(),
         BorrowedWindowView(EndpointRole.ATTENTION, "npu", 1, 1, NPU_WINDOW_BYTES, NPU_WINDOW_BYTES),
-        BorrowedWindowView(EndpointRole.WSE_SURROGATE, "wse", 1, 2, WSE_WINDOW_BYTES, WSE_WINDOW_BYTES),
+        BorrowedWindowView(EndpointRole.WSE, "wse", 1, 2, WSE_WINDOW_BYTES, WSE_WINDOW_BYTES),
         ContractFakeControl(),
         lease,
     )

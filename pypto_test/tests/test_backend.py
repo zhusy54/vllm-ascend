@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pypto_test.backend import NpuSurrogateBackend
+from pypto_test.backend import WseBackend
 from pypto_test.contracts import (
     CACHE_LINE_BYTES,
     WSE_LIFECYCLE_OFFSET,
@@ -61,11 +61,11 @@ class FakePort:
         pass
 
 
-def test_surrogate_backend_only_controls_resident_kernel():
+def test_wse_backend_only_controls_resident_kernel():
     port = FakePort()
-    local = BorrowedWindowView(EndpointRole.WSE_SURROGATE, "wse", 7, 1000, 2**20, 2**21)
+    local = BorrowedWindowView(EndpointRole.WSE, "wse", 7, 1000, 2**20, 2**21)
     peer = BorrowedWindowView(EndpointRole.ATTENTION, "npu", 7, 10_000_000, 4 * 2**20, 4 * 2**20)
-    backend = NpuSurrogateBackend(
+    backend = WseBackend(
         execution_port=port,
         local_window=local,
         npu_peer_window=peer,
@@ -73,7 +73,7 @@ def test_surrogate_backend_only_controls_resident_kernel():
         timeout_seconds=0.1,
     )
     ready = backend.initialize()
-    assert ready["backend_kind"] == "NPU_SURROGATE"
+    assert ready["backend_kind"] == "WSE"
     assert port.arguments.local_b_input == local.address
     assert not hasattr(backend, "execute")
     assert not hasattr(backend, "allocate_window")

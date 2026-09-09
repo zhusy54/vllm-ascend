@@ -12,7 +12,7 @@ One execute call follows this end-to-end path:
 
     Host input H2D + request publication
       -> resident Attention driver executes A
-      -> Device P2P submission wakes resident surrogate B
+      -> Device P2P submission wakes resident WSE-side B
       -> Device P2P completion wakes the Attention driver
       -> Attention driver executes C and publishes final completion
       -> Host observes only final completion and copies final output D2H
@@ -67,7 +67,7 @@ class DriverKernelArguments(ctypes.Structure):
 
     Local addresses cover Host ingress, B return, final output, and all local
     control lines.  The three remote addresses are imported views of the
-    surrogate input/submission area used directly by the Attention Device.
+    WSE input/submission area used directly by the Attention Device.
     """
 
     _fields_ = [
@@ -90,44 +90,6 @@ class DriverKernelArguments(ctypes.Structure):
     ]
 
 
-class FinalCompletionObserver:
-    """Poll only the final Host-visible completion.
-
-    Blocking here is valid service behavior.  The observer never examines the
-    B-completion line and never synchronizes the resident driver stream, so it
-    cannot be responsible for advancing B -> C.
-    """
-
-    def __init__(self, bundle: EndpointBundle, *, timeout_seconds: float) -> None:
-        self._bundle = bundle
-        self._timeout_seconds = timeout_seconds
-
-    def wait(self, sequence: int) -> tuple[CompletionDescriptor, int]:
-        address = self._bundle.npu_local_window.address
-        port = self._bundle.execution_port
-        deadline = time.monotonic() + self._timeout_seconds
-        poll_reads = 0
-        while True:
-            # Count every cache-line D2H read independently from the final
-            # payload D2H.  This makes Host involvement measurable.
-            signal = SignalLine.from_bytes(
-                port.copy_device_to_host(address + NPU_HOST_RESULT_SIGNAL_OFFSET, CACHE_LINE_BYTES)
-            )
-            poll_reads += 1
-            if signal.sequence == sequence:
-                # The driver's signal is written only after final output and
-                # this descriptor are globally visible.
-                descriptor = CompletionDescriptor.from_bytes(
-                    port.copy_device_to_host(address + NPU_HOST_RESULT_DESC_OFFSET, CACHE_LINE_BYTES)
-                )
-                return descriptor, poll_reads
-            if signal.sequence > sequence:
-                raise ServiceError("final completion sequence advanced beyond the request")
-            if time.monotonic() >= deadline:
-                raise ServiceError("timed out waiting for final device completion")
-            time.sleep(DEFAULT_POLL_INTERVAL_SECONDS)
-
-
 class PseudoPyptoDistributedService:
     """Synchronous, single-request proxy with PyPTO-compatible assumed APIs.
 
@@ -146,7 +108,6 @@ class PseudoPyptoDistributedService:
         self._bundle = bundle
         self._driver_binary = driver_binary
         self._timeout_seconds = timeout_seconds
-        self._observer = FinalCompletionObserver(bundle, timeout_seconds=timeout_seconds)
         self._state = ServiceState.NEW
         self._kernel = None
         self._sequence = 0
@@ -168,23 +129,46 @@ class PseudoPyptoDistributedService:
         return self._state
 
     def initialize(self, program: PseudoProgramSpec | None = None) -> dict[str, Any]:
-        """Validate the bundle, start both resident kernels, and reach READY."""
+        """Perform the five explicit service-initialization steps."""
 
         if self._state is not ServiceState.NEW:
             raise ServiceError("initialize is only valid in NEW state")
         self._state = ServiceState.INITIALIZING
+        spec = self._validate_initialization_context(program)
+        self._initialize_control_regions()
+        remote_ready = self._start_wse_execution_service()
+        self._start_npu_execution_driver()
+        return self._wait_until_ready(spec, remote_ready)
+
+    def _validate_initialization_context(self, program: PseudoProgramSpec | None) -> PseudoProgramSpec:
+        """Validate the fixed program and Bootstrap-lent resource bundle."""
+
         spec = program if program is not None else PseudoProgramSpec()
         spec.validate()
         self._bundle.validate()
+        return spec
+
+    def _initialize_control_regions(self) -> None:
+        """Clear Host-visible Attention control records before kernel launch."""
+
+        local = self._bundle.npu_local_window.address
+        # Payload regions are populated only by execute or by the two Device
+        # kernels; initialization clears control records only.
+        self._bundle.execution_port.copy_host_to_device(local + NPU_CONTROL_OFFSET, bytes(10 * CACHE_LINE_BYTES))
+
+    def _start_wse_execution_service(self) -> dict[str, Any]:
+        """Ask the WSE Host control plane to start its resident B service."""
+
+        # This lifecycle RPC carries no request data.  It returns only after B
+        # reports Device READY, so the NPU driver can safely start afterwards.
+        return self._bundle.wse_control.start()
+
+    def _start_npu_execution_driver(self) -> None:
+        """Bind Bootstrap-provided addresses and start the resident ABC driver."""
+
         local = self._bundle.npu_local_window.address
         port = self._bundle.execution_port
-        # Step 1: clear Attention control lines.  Payload regions are populated
-        # only by execute or by the two Device kernels.
-        port.copy_host_to_device(local + NPU_CONTROL_OFFSET, bytes(10 * CACHE_LINE_BYTES))
-        # Step 2: start B first, so it is already waiting when the driver is
-        # launched.  This RPC is generation-level and carries no request data.
-        remote_ready = self._bundle.wse_control.start()
-        # Step 3: bind local and imported peer VAs into the resident driver ABI.
+        # Bind local and imported peer VAs into the resident driver ABI.
         arguments = DriverKernelArguments(
             local + NPU_INPUT_OFFSET,
             local + NPU_B_OUTPUT_OFFSET,
@@ -204,7 +188,13 @@ class PseudoPyptoDistributedService:
             MAX_ELEMENTS,
         )
         self._kernel = port.launch_kernel(self._driver_binary, arguments)
-        # Step 4: READY is written by the Device kernel itself; observing it
+
+    def _wait_until_ready(self, spec: PseudoProgramSpec, remote_ready: dict[str, Any]) -> dict[str, Any]:
+        """Wait for the NPU driver READY signal, then admit service requests."""
+
+        if self._kernel is None:
+            raise ServiceError("driver kernel was not launched")
+        # READY is written by the Device kernel itself; observing it
         # proves the resident loop is live before admission begins.
         lifecycle, polls = self._wait_for_lifecycle("ready")
         self._state = ServiceState.READY
@@ -252,7 +242,7 @@ class PseudoPyptoDistributedService:
             # From here until final completion, Host performs no operation on
             # A output, B submission, B payload, or B completion.  Both Device
             # kernels advance that dependency chain by remote memory signals.
-            completion, poll_reads = self._observer.wait(sequence)
+            completion, poll_reads = self._wait_for_final_completion(sequence)
             self._traffic["final_control_d2h_bytes"] += (poll_reads + 1) * CACHE_LINE_BYTES
             if completion.generation != self._bundle.generation:
                 raise ServiceError("completion generation mismatch")
@@ -301,7 +291,7 @@ class PseudoPyptoDistributedService:
         self._state = ServiceState.DRAINING
         local = self._bundle.npu_local_window.address
         # With no in-flight request, the Attention driver can leave its wait
-        # loop immediately.  The surrogate receives the equivalent STOP via
+        # loop immediately.  The WSE side receives the equivalent STOP via
         # its generation-level control endpoint below.
         self._bundle.execution_port.copy_host_to_device(
             local + NPU_LIFECYCLE_OFFSET,
@@ -358,6 +348,33 @@ class PseudoPyptoDistributedService:
                 CACHE_LINE_BYTES,
             )
         )
+
+    def _wait_for_final_completion(self, sequence: int) -> tuple[CompletionDescriptor, int]:
+        """Poll only C's final completion; never observe or advance B -> C."""
+
+        address = self._bundle.npu_local_window.address
+        port = self._bundle.execution_port
+        deadline = time.monotonic() + self._timeout_seconds
+        poll_reads = 0
+        while True:
+            # Count every cache-line D2H read independently from the final
+            # payload D2H.  This makes permitted Host involvement measurable.
+            signal = SignalLine.from_bytes(
+                port.copy_device_to_host(address + NPU_HOST_RESULT_SIGNAL_OFFSET, CACHE_LINE_BYTES)
+            )
+            poll_reads += 1
+            if signal.sequence == sequence:
+                # The driver publishes this signal only after C output and the
+                # final descriptor are globally visible.
+                descriptor = CompletionDescriptor.from_bytes(
+                    port.copy_device_to_host(address + NPU_HOST_RESULT_DESC_OFFSET, CACHE_LINE_BYTES)
+                )
+                return descriptor, poll_reads
+            if signal.sequence > sequence:
+                raise ServiceError("final completion sequence advanced beyond the request")
+            if time.monotonic() >= deadline:
+                raise ServiceError("timed out waiting for final device completion")
+            time.sleep(DEFAULT_POLL_INTERVAL_SECONDS)
 
     def _wait_for_lifecycle(self, field: str) -> tuple[LifecycleLine, int]:
         deadline = time.monotonic() + self._timeout_seconds

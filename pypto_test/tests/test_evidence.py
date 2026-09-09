@@ -14,7 +14,9 @@ from copy import deepcopy
 
 import pytest
 
-from pypto_test.collect_evidence import EvidenceError, validate_generation
+from pypto_test.contracts import ExecutionResult, checksum_u32
+from pypto_test.validation.collect_evidence import EvidenceError, validate_generation
+from pypto_test.validation.validation_utils import expected_abc, get_input_payload, return_result
 
 
 def make_evidence():
@@ -36,15 +38,15 @@ def make_evidence():
                 "mapping_count": 2,
             },
         },
-        "endpoint_bundle": {"backend_kind": "NPU_SURROGATE", "transport_scope": "HOST_LOCAL"},
-        "executions": [{}],
-        "resident_kernel_launches": {"attention": 1, "wse_surrogate": 1},
+        "endpoint_bundle": {"backend_kind": "WSE", "transport_scope": "HOST_LOCAL"},
+        "execution_summary": {"request_count": 1},
+        "resident_kernel_launches": {"attention": 1, "wse": 1},
         "service": {
             "driver": {"report": {**report, "a_runs": 1, "c_runs": 1}},
             "traffic": {"host_intermediate_bytes": 0},
         },
         "status": "PASS",
-        "surrogate": {
+        "wse": {
             "backend": {"report": {**report, "b_runs": 1}},
             "memory": {
                 "allocated_window_count": 1,
@@ -59,13 +61,21 @@ def test_evidence_validator_accepts_measured_contract():
     validate_generation(make_evidence(), expected_requests=1)
 
 
+def test_return_result_validates_and_prints_final_output(capsys):
+    payload = get_input_payload(generation=1, request_id=1, element_count=4)
+    output = expected_abc(payload)
+    result = ExecutionResult(1, 1, 1, 4, output, checksum_u32(output), 1, 128, len(output))
+    return_result(payload, result)
+    assert '"status": "PASS"' in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     ("path", "value", "match"),
     (
         (("service", "traffic", "host_intermediate_bytes"), 4, "Host participated"),
         (("resident_kernel_launches", "attention"), 2, "exactly once"),
         (("bootstrap", "memory", "live_mapping_count"), 1, "live mapping"),
-        (("surrogate", "backend", "report", "b_runs"), 0, "B device"),
+        (("wse", "backend", "report", "b_runs"), 0, "B device"),
     ),
 )
 def test_evidence_validator_fails_closed(path, value, match):
