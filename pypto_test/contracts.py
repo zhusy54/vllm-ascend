@@ -1,7 +1,19 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Contracts for the isolated fixed-ABC proxy validation prototype."""
+"""Wire and ownership contracts for the fixed-ABC validation prototype.
+
+This file contains data descriptions and capability interfaces; none of the
+classes here creates a process, allocates device memory, or executes a task.
+Keeping those concerns out of the contracts makes the software boundary under
+test explicit: Bootstrap owns resources, while the proxy service only borrows
+the capabilities collected in :class:`EndpointBundle`.
+
+The prototype intentionally describes one fixed program rather than a generic
+PyPTO graph.  A runs on the Attention NPU, B runs on an NPU standing in for the
+WSE, and C runs back on the Attention NPU.  A real compiler and scheduler are
+therefore outside the conclusion supported by this test.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +35,21 @@ DEFAULT_PROGRAM_ID = "fixed-abc-v1"
 DEFAULT_TIMEOUT_SECONDS = 120.0
 DEFAULT_POLL_INTERVAL_SECONDS = 0.001
 
+# One Attention-owned VMM window contains three maximum-sized payload areas,
+# followed by cache-line-separated control records.  The separation lets each
+# producer publish a descriptor before changing its signal without two actors
+# updating the same cache line.
+#
+#   NPU window
+#   +----------------------+ NPU_INPUT_OFFSET
+#   | Host input / A input |
+#   +----------------------+ NPU_B_OUTPUT_OFFSET
+#   | B output / C input   |  written remotely by the surrogate Device
+#   +----------------------+ NPU_FINAL_OUTPUT_OFFSET
+#   | C output             |  read by Host only after final completion
+#   +----------------------+ NPU_CONTROL_OFFSET
+#   | request/result/B-completion/lifecycle/report control lines
+#   +----------------------+
 NPU_INPUT_OFFSET = 0
 NPU_B_OUTPUT_OFFSET = MAX_PAYLOAD_BYTES
 NPU_FINAL_OUTPUT_OFFSET = 2 * MAX_PAYLOAD_BYTES
@@ -37,6 +64,16 @@ NPU_LIFECYCLE_OFFSET = NPU_CONTROL_OFFSET + (6 * CACHE_LINE_BYTES)
 NPU_REPORT_OFFSET = NPU_CONTROL_OFFSET + (7 * CACHE_LINE_BYTES)
 NPU_WINDOW_BYTES = NPU_CONTROL_OFFSET + (10 * CACHE_LINE_BYTES)
 
+# The surrogate-owned window needs only the A output/B input payload and the B
+# submission control.  B writes its output and completion directly into the
+# imported Attention window, so there is no surrogate-Host result buffer.
+#
+#   surrogate window
+#   +----------------------+ WSE_B_INPUT_OFFSET
+#   | A output / B input   |  written remotely by the Attention Device
+#   +----------------------+ WSE_CONTROL_OFFSET
+#   | B submission/lifecycle/report control lines
+#   +----------------------+
 WSE_B_INPUT_OFFSET = 0
 WSE_CONTROL_OFFSET = MAX_PAYLOAD_BYTES
 WSE_B_SUBMISSION_SIGNAL_OFFSET = WSE_CONTROL_OFFSET
@@ -81,6 +118,8 @@ class LeaseState(str, Enum):
 
 @dataclass(frozen=True)
 class PseudoTask:
+    """Human-readable placement metadata for the fixed validation program."""
+
     name: str
     placement: str
     dependencies: tuple[str, ...] = ()
@@ -95,6 +134,8 @@ ABC_TASKS = (
 
 @dataclass(frozen=True)
 class PseudoProgramSpec:
+    """The single accepted program; this is not a general dependency graph."""
+
     program_id: str = DEFAULT_PROGRAM_ID
     dtype: str = "uint32"
     max_elements: int = MAX_ELEMENTS
@@ -117,6 +158,12 @@ class PseudoProgramSpec:
 
 @dataclass(frozen=True)
 class ProxyBufferLayout:
+    """Versioned sizes shared by both processes and both AIV kernels.
+
+    The hash travels in each manifest.  Rejecting a mismatched hash prevents a
+    kernel compiled for one offset scheme from attaching to another scheme.
+    """
+
     npu_window_bytes: int = NPU_WINDOW_BYTES
     wse_window_bytes: int = WSE_WINDOW_BYTES
     max_payload_bytes: int = MAX_PAYLOAD_BYTES
@@ -138,6 +185,12 @@ EXPECTED_LAYOUT_HASH = DEFAULT_LAYOUT.layout_hash
 
 @dataclass(frozen=True)
 class BorrowedWindowView:
+    """Process-local Device VA borrowed from Bootstrap.
+
+    The view deliberately has no close/free method.  Its address is meaningful
+    only in the process whose MemoryManager created or imported the mapping.
+    """
+
     owner: EndpointRole
     buffer_id: str
     generation: int
@@ -169,6 +222,13 @@ class KernelSession(Protocol):
 
 @runtime_checkable
 class DeviceExecutionPort(Protocol):
+    """Narrow capability used by proxy/backend code after bootstrap.
+
+    It permits bounded copies and kernel launch, but has no VMM
+    allocate/import/map/free methods.  Resource ownership therefore cannot
+    accidentally migrate into the service layer.
+    """
+
     @property
     def generation(self) -> int: ...
 
@@ -183,6 +243,8 @@ class DeviceExecutionPort(Protocol):
 
 @runtime_checkable
 class WseServiceControl(Protocol):
+    """Generation-level control RPC; it never carries request tensors."""
+
     def start(self) -> dict[str, Any]: ...
 
     def health(self) -> dict[str, Any]: ...
@@ -194,6 +256,12 @@ class WseServiceControl(Protocol):
 
 @dataclass
 class BootstrapLease:
+    """Enforces CREATED -> BORROWED -> QUIESCED -> RELEASED ordering.
+
+    ``quiesce`` means the proxy has stopped both resident kernels and released
+    its logical use of the bundle.  Only then may Bootstrap destroy mappings.
+    """
+
     lease_id: str
     generation: int
     state: LeaseState = LeaseState.CREATED
@@ -220,6 +288,13 @@ class BootstrapLease:
 
 @dataclass(frozen=True)
 class EndpointBundle:
+    """Capabilities lent by Bootstrap to one proxy service generation.
+
+    This is a context object, not an active runtime module.  It groups the two
+    process-local window views, an execution port, lifecycle control, and the
+    lease that proves the resources are still valid.
+    """
+
     generation: int
     endpoint_id: str
     backend_kind: str
@@ -252,6 +327,8 @@ class EndpointBundle:
 
 @dataclass(frozen=True)
 class SignalLine:
+    """One monotonically increasing sequence used as a publication signal."""
+
     sequence: int
 
     def to_bytes(self) -> bytes:
@@ -266,6 +343,8 @@ class SignalLine:
 
 @dataclass(frozen=True)
 class HostRequestDescriptor:
+    """Host-to-driver request metadata published before the request signal."""
+
     generation: int
     request_id: int
     element_count: int
@@ -301,6 +380,8 @@ class HostRequestDescriptor:
 
 @dataclass(frozen=True)
 class RemoteTaskDescriptor:
+    """A-to-B metadata written by the Attention Device into the peer window."""
+
     generation: int
     request_id: int
     element_count: int
@@ -336,6 +417,12 @@ class RemoteTaskDescriptor:
 
 @dataclass(frozen=True)
 class CompletionDescriptor:
+    """Completion metadata used for both B-to-C and final Host completion.
+
+    ``generation`` rejects a stale service instance, ``request_id`` identifies
+    the logical call, and ``sequence`` orders reuse of the single shared slot.
+    """
+
     generation: int
     request_id: int
     element_count: int
@@ -371,6 +458,8 @@ class CompletionDescriptor:
 
 @dataclass(frozen=True)
 class LifecycleLine:
+    """Host-visible ready/stop handshake for one resident kernel."""
+
     stop_requested: int = 0
     stopped: int = 0
     ready: int = 0
@@ -391,6 +480,8 @@ class LifecycleLine:
 
 @dataclass(frozen=True)
 class DriverReport:
+    """Device-written counters proving the driver's A -> wait-B -> C path."""
+
     accepted: int
     completed: int
     a_runs: int
@@ -420,6 +511,8 @@ class DriverReport:
 
 @dataclass(frozen=True)
 class ServiceReport:
+    """Device-written counters proving the surrogate accepted and ran B."""
+
     accepted: int
     completed: int
     b_runs: int
@@ -449,6 +542,8 @@ class ServiceReport:
 
 @dataclass(frozen=True)
 class ExecutionResult:
+    """Final proxy result plus Host-visible transfer accounting."""
+
     generation: int
     request_id: int
     sequence: int
@@ -462,6 +557,8 @@ class ExecutionResult:
 
 @dataclass
 class MemoryOperationAudit:
+    """Records which Bootstrap-local owner performed each VMM operation."""
+
     operations: list[dict[str, Any]] = field(default_factory=list)
 
     def record(self, *, actor: str, operation: str, buffer_id: str) -> None:
@@ -475,17 +572,23 @@ class MemoryOperationAudit:
 
 
 def checksum_u32(payload: bytes) -> int:
+    """Return a deterministic validation checksum, not a production integrity code."""
+
     _validate_uint32_payload(payload)
     return sum(value[0] for value in struct.iter_unpack("<I", payload))
 
 
 def expected_abc(payload: bytes) -> bytes:
+    """CPU oracle for ``C(B(A(x))) == 2*x+5`` with uint32 wraparound."""
+
     _validate_uint32_payload(payload)
     values = (((value[0] + 1) * 2 + 3) & 0xFFFFFFFF for value in struct.iter_unpack("<I", payload))
     return b"".join(struct.pack("<I", value) for value in values)
 
 
 def deterministic_input(*, generation: int, request_id: int, element_count: int) -> bytes:
+    """Make reproducible, generation/request-specific test input."""
+
     if generation <= 0 or request_id <= 0:
         raise ContractError("generation and request_id must be positive")
     if element_count <= 0 or element_count > MAX_ELEMENTS:

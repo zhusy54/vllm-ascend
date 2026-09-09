@@ -1,7 +1,21 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Run V01-V06 and collect redacted proxy validation evidence."""
+"""Run V01-V06 and collect redacted proxy validation evidence.
+
+Correct output alone is insufficient for this prototype: Host forwarding an
+intermediate value could produce the same answer while violating the intended
+architecture.  The collector therefore correlates three evidence groups:
+
+* device reports prove A, B, and C ran once per accepted request;
+* transfer counters prove Host touched ingress and final egress, but no
+  intermediate payload;
+* memory/lifecycle audits prove one Bootstrap allocation per endpoint and zero
+  live mappings after release.
+
+Detailed artifacts are useful for local debugging and remain gitignored.  Only
+a small summary with no raw VMM handle or Device VA is checked into docs.
+"""
 
 from __future__ import annotations
 
@@ -26,6 +40,8 @@ class CaseDefinition:
 
 
 CASE_DEFINITIONS = {
+    # V01: lifecycle only; V02: one 4 KiB request; V03: boundary sizes;
+    # V04: repeated slot reuse; V05: orderly shutdown; V06: new generation.
     "V01": CaseDefinition("V01", ()),
     "V02": CaseDefinition("V02", (1024,)),
     "V03": CaseDefinition("V03", (16, 1024, 16 * 1024, MAX_ELEMENTS)),
@@ -35,6 +51,8 @@ CASE_DEFINITIONS = {
 }
 
 DEFAULT_MATRIX = (
+    # Both process start orders must reach READY, and both must complete the
+    # full V03 size range.  Other cases need one order in this first prototype.
     ("V01", "attention-first"),
     ("V01", "wse-first"),
     ("V02", "attention-first"),
@@ -51,6 +69,10 @@ class EvidenceError(RuntimeError):
 
 
 def validate_generation(evidence: dict[str, Any], *, expected_requests: int) -> None:
+    """Fail closed unless execution, ownership, and cleanup all agree."""
+
+    # Scope checks prevent a passing surrogate run from being reported as real
+    # WSE or cross-Host evidence.
     if evidence.get("status") != "PASS":
         raise EvidenceError("generation did not report PASS")
     if len(evidence.get("executions", ())) != expected_requests:
@@ -61,6 +83,9 @@ def validate_generation(evidence: dict[str, Any], *, expected_requests: int) -> 
         raise EvidenceError("prototype must use the NPU surrogate")
     if evidence["resident_kernel_launches"] != {"attention": 1, "wse_surrogate": 1}:
         raise EvidenceError("resident kernels were not launched exactly once")
+
+    # A zero intermediate byte count is the observable Host-side assertion;
+    # device reports below independently show where A/B/C actually ran.
     traffic = evidence["service"]["traffic"]
     if traffic["host_intermediate_bytes"] != 0:
         raise EvidenceError("Host participated in the A/B/C intermediate path")
@@ -76,6 +101,9 @@ def validate_generation(evidence: dict[str, Any], *, expected_requests: int) -> 
         raise EvidenceError("A/C device run counters mismatch")
     if surrogate_report["b_runs"] != expected_requests:
         raise EvidenceError("B device run counter mismatch")
+
+    # Each endpoint has one owned mapping and one imported peer mapping during
+    # execution.  Both must be gone by the time evidence is returned.
     memory = evidence["bootstrap"]["memory"]
     remote_memory = evidence["surrogate"]["memory"]
     for endpoint in (memory, remote_memory):
@@ -95,6 +123,8 @@ def run_case(
     surrogate_device: int,
     kernel_dir: Path,
 ) -> dict[str, Any]:
+    """Run every generation required by one named validation case."""
+
     definition = CASE_DEFINITIONS[case_id]
     generations = []
     for generation in definition.generations:
@@ -109,6 +139,8 @@ def run_case(
         validate_generation(evidence, expected_requests=len(definition.element_counts))
         generations.append(evidence)
     if case_id == "V06":
+        # V06 intentionally uses fresh processes and Bootstrap state.  Distinct
+        # run/lease identities plus release evidence reject logical reuse of G.
         first, second = generations
         if first["endpoint_bundle"]["lease_id"] == second["endpoint_bundle"]["lease_id"]:
             raise EvidenceError("V06 reused a bootstrap lease")
@@ -130,6 +162,8 @@ def collect(
     kernel_dir: Path,
     artifact_dir: Path,
 ) -> dict[str, Any]:
+    """Execute the selected matrix and persist replay/debug artifacts."""
+
     artifact_dir.mkdir(parents=True, exist_ok=True)
     cases = []
     for case_id, start_order in matrix:
@@ -159,6 +193,8 @@ def collect(
 
 
 def _environment() -> dict[str, Any]:
+    """Capture environment context; NPU health text is not a pass criterion."""
+
     try:
         npu_smi = subprocess.run(
             ["npu-smi", "info"],

@@ -1,7 +1,27 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Bootstrap-owned device memory and host-local control protocol."""
+"""Bootstrap-owned process, device-memory, and control-plane implementation.
+
+For each generation the Attention Host and surrogate Host are independent
+processes, each with its own ACL Device Context.  Bootstrap coordinates this
+sequence:
+
+    launch/connect processes
+      -> each local MemoryManager allocates one owned VMM window
+      -> exchange shareable handles over the TCP control channel
+      -> each local MemoryManager imports the peer window
+      -> acknowledge that both mappings are usable
+      -> lend an EndpointBundle to the proxy service
+
+The TCP channel is a control plane: it carries manifests and generation-level
+START/HEALTH/DRAIN/CLOSE/RELEASE messages.  A/B/C tensors and per-request
+Device notifications use only the VMM P2P data plane established here.
+
+BootstrapManager is the logical owner of the whole generation.  Physical ACL
+operations still execute in the process that owns the relevant Device Context,
+through NpuDeviceMemoryManager or SurrogateDeviceMemoryManager.
+"""
 
 from __future__ import annotations
 
@@ -98,6 +118,13 @@ class _Runtime(Protocol):
 
 @dataclass(frozen=True)
 class WindowManifest:
+    """Serializable description needed to import one peer VMM allocation.
+
+    ``shareable_handle`` is required during the live bootstrap exchange but is
+    removed by :meth:`evidence`; neither raw handles nor process-local Device
+    virtual addresses belong in persistent artifacts.
+    """
+
     endpoint_id: str
     role: EndpointRole
     device_id: int
@@ -180,7 +207,12 @@ def connect_control_endpoint(host: str, port: int) -> socket.socket:
 
 
 class ProxyControlChannel:
-    """Length-prefixed JSON channel restricted to lifecycle control data."""
+    """Length-prefixed JSON channel restricted to bootstrap/lifecycle data.
+
+    Every frame is scoped by protocol version, run ID, generation, and sender
+    role.  Explicitly rejecting tensor-like keys guards against accidentally
+    turning this convenient TCP channel into an A/B/C payload path.
+    """
 
     def __init__(self, connection: socket.socket, *, run_id: str, generation: int) -> None:
         self.connection = connection
@@ -272,7 +304,13 @@ def _find_forbidden_keys(value: object) -> set[str]:
 
 
 class BorrowedDeviceExecutionPort(DeviceExecutionPort):
-    """Narrow execution capability; it intentionally has no VMM lifecycle API."""
+    """Narrow execution capability; it intentionally has no VMM lifecycle API.
+
+    The private runtime reference is never returned to the proxy.  Address
+    checks constrain every Host copy to the two windows lent for this
+    generation, and invalidation makes retained service references unusable
+    after Bootstrap starts releasing resources.
+    """
 
     def __init__(
         self,
@@ -319,7 +357,13 @@ class BorrowedDeviceExecutionPort(DeviceExecutionPort):
 
 
 class DeviceMemoryManager:
-    """The sole owner of one endpoint's runtime and communication windows."""
+    """Sole physical owner of one endpoint's runtime and communication windows.
+
+    Exactly one instance lives next to each Device Context.  No proxy or
+    backend object receives this manager, which is the architectural mechanism
+    used by the prototype to keep allocation and mapping outside PyPTO service
+    execution.
+    """
 
     def __init__(
         self,
@@ -347,8 +391,12 @@ class DeviceMemoryManager:
         self._mapping_count = 0
 
     def initialize(self) -> WindowManifest:
+        """Create the local Context/window and export its physical handle."""
+
         if self._closed or self._local is not None:
             raise BootstrapError("memory manager cannot initialize in its current state")
+        # Context creation and owned HBM allocation are local physical actions.
+        # The returned manifest is only a description for the peer process.
         self._runtime.initialize()
         self.audit.record(actor=self.__class__.__name__, operation="runtime_initialize", buffer_id=self.endpoint_id)
         self._local = self._runtime.allocate_window(self.logical_bytes)
@@ -372,11 +420,16 @@ class DeviceMemoryManager:
         return "npu-window" if self.role is EndpointRole.ATTENTION else "wse-window"
 
     def attach(self, peer: WindowManifest) -> None:
+        """Import the peer allocation into this process's Device VA space."""
+
         peer.validate(generation=self.generation)
         if self._local is None or self._peer is not None:
             raise BootstrapError("memory manager cannot attach in its current state")
         if peer.role is self.role:
             raise BootstrapError("cannot attach a manifest with the local role")
+        # The raw handle names the peer's physical allocation.  import_window
+        # creates a different, process-local VA through which this Device can
+        # issue remote loads/stores.
         exported = VmmExport(peer.device_id, peer.mapping_bytes, peer.shareable_handle)
         self._peer = self._runtime.import_window(exported, peer_device_id=peer.device_id)
         self._mapping_count += 1
@@ -385,6 +438,8 @@ class DeviceMemoryManager:
     def borrowed_resources(
         self, peer: WindowManifest
     ) -> tuple[BorrowedWindowView, BorrowedWindowView, DeviceExecutionPort]:
+        """Lend views and execution capability without transferring ownership."""
+
         if self._local is None or self._peer is None:
             raise BootstrapError("both local and peer windows must be ready")
         local_view = BorrowedWindowView(
@@ -414,8 +469,13 @@ class DeviceMemoryManager:
         return local_view, peer_view, self._port
 
     def release(self) -> None:
+        """Invalidate borrowers, unmap the peer, free local HBM, close Context."""
+
         if self._closed:
             return
+        # Normal callers reach this only after service.close() has stopped both
+        # resident kernels.  Invalidate first so no stale reference can submit
+        # more work while mappings are being torn down.
         if self._port is not None:
             self._port.invalidate()
         if self._peer is not None:
@@ -455,6 +515,8 @@ class SurrogateDeviceMemoryManager(DeviceMemoryManager):
 
 
 class RemoteWseServiceControl:
+    """Attention-side generation control stub for the surrogate Host process."""
+
     def __init__(self, channel: ProxyControlChannel) -> None:
         self._channel = channel
         self._closed = False
@@ -480,7 +542,12 @@ class RemoteWseServiceControl:
 
 
 class SurrogateProcessController:
-    """Bootstrap-owned lifetime handle for the remote Host process."""
+    """Bootstrap-owned lifetime handle for the remote Host process.
+
+    Keeping join/termination and its evidence queue here means Launcher does
+    not become an additional owner of runtime resources.  ``abort`` exists for
+    local cleanup; the validation's asserted normal path uses ``collect``.
+    """
 
     def __init__(self, connection: socket.socket, process: Any, result_queue: Any) -> None:
         self.connection = connection
@@ -515,6 +582,8 @@ class SurrogateProcessController:
 
 @dataclass(frozen=True)
 class SurrogateBootstrapResources:
+    """Borrowed capabilities handed to the surrogate backend after attach."""
+
     local_window: BorrowedWindowView
     npu_peer_window: BorrowedWindowView
     execution_port: DeviceExecutionPort
@@ -522,7 +591,12 @@ class SurrogateBootstrapResources:
 
 
 class BootstrapManager:
-    """Attention-side coordinator that lends, but never transfers, memory ownership."""
+    """Attention-side logical owner of one complete service generation.
+
+    The manager owns process orchestration, handle exchange, the Attention
+    MemoryManager, and the lease.  It lends an EndpointBundle to the service,
+    but it retains the authority to release all communication resources.
+    """
 
     def __init__(
         self,
@@ -554,6 +628,10 @@ class BootstrapManager:
         kernel_binary: Path,
         start_order: str,
     ) -> BootstrapManager:
+        """Start the remote Host and construct the Attention-side coordinator."""
+
+        # Process creation happens before either ACL runtime is initialized.
+        # This avoids inheriting a live Device Context into the child process.
         connection, process, result_queue = _launch_surrogate_process(
             endpoint_target=endpoint_target,
             start_order=start_order,
@@ -577,14 +655,26 @@ class BootstrapManager:
         )
 
     def prepare(self) -> EndpointBundle:
+        """Build the bidirectional P2P data plane and lend its capabilities."""
+
+        # Phase 1: allocate the Attention-owned window and exchange both raw
+        # manifests.  Both peers send first, so either startup order converges
+        # on the same protocol state without designating a data-plane server.
         local_manifest = self.memory_manager.initialize()
         self.channel.send("MANIFEST", EndpointRole.ATTENTION, manifest=local_manifest.to_dict())
         message = self.channel.receive("MANIFEST", EndpointRole.WSE_SURROGATE)
         peer_manifest = WindowManifest.from_dict(message["manifest"])
         peer_manifest.validate(generation=self.generation)
+
+        # Phase 2: import the surrogate allocation locally.  ATTACHED is a
+        # rendezvous barrier: no resident kernel is launched until both peers
+        # report that their peer mapping exists.
         self.memory_manager.attach(peer_manifest)
         self.channel.send("ATTACHED", EndpointRole.ATTENTION)
         self.channel.receive("ATTACHED", EndpointRole.WSE_SURROGATE)
+
+        # Phase 3: expose only borrowed capabilities.  The lease ties every
+        # address and execution operation to this immutable generation.
         local, peer, port = self.memory_manager.borrowed_resources(peer_manifest)
         lease = BootstrapLease(f"lease-{uuid4().hex}", self.generation)
         lease.borrow()
@@ -607,10 +697,15 @@ class BootstrapManager:
         return bundle
 
     def release(self) -> dict[str, Any] | None:
+        """Release both endpoints only after the proxy has quiesced its lease."""
+
         if self._lease is None:
             raise BootstrapError("bootstrap resources were not prepared")
         if self._lease.state is not LeaseState.QUIESCED:
             raise BootstrapError("service must quiesce its lease before bootstrap release")
+        # The remote backend and binary were already closed by service.close().
+        # Release the remote mapping/window first, then the Attention side, and
+        # mark the lease RELEASED only after both physical owners acknowledge.
         self.channel.send("RELEASE", EndpointRole.ATTENTION)
         self.channel.receive("RELEASED", EndpointRole.WSE_SURROGATE)
         self._lifecycle_events.append("surrogate_released")
@@ -642,6 +737,11 @@ def accept_surrogate_bootstrap(
     channel: ProxyControlChannel,
     memory_manager: SurrogateDeviceMemoryManager,
 ) -> SurrogateBootstrapResources:
+    """Perform the mirror image of ``BootstrapManager.prepare`` remotely."""
+
+    # This function runs inside the surrogate process, so all ACL calls below
+    # operate on the surrogate's own Device Context rather than by cross-Host
+    # invocation from the Attention process.
     local_manifest = memory_manager.initialize()
     channel.send("MANIFEST", EndpointRole.WSE_SURROGATE, manifest=local_manifest.to_dict())
     message = channel.receive("MANIFEST", EndpointRole.ATTENTION)
@@ -662,14 +762,20 @@ def _launch_surrogate_process(
     run_id: str,
     kernel_binary: Path,
 ) -> tuple[socket.socket, Any, Any]:
+    """Create an independent process and connect either supported start order."""
+
+    # ``spawn`` is intentional: the child starts with no inherited ACL state.
     context = multiprocessing.get_context("spawn")
     ready_event = context.Event()
     result_queue = context.Queue()
     if start_order == "attention-first":
+        # Attention creates the listener before the surrogate process exists.
         listener = open_control_listener(DEFAULT_CONTROL_HOST, 0)
         port = listener.getsockname()[1]
         listens = False
     elif start_order == "wse-first":
+        # Reserve a free port, then let the surrogate become the listener.  The
+        # event prevents Attention from racing the child's bind/listen step.
         reservation = open_control_listener(DEFAULT_CONTROL_HOST, 0)
         port = reservation.getsockname()[1]
         reservation.close()

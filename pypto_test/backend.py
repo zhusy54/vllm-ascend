@@ -1,7 +1,19 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Host control backend for the resident surrogate B service."""
+"""Host control backend for the resident surrogate B service.
+
+The backend is deliberately absent from the per-request path.  Its Host-side
+job is to bind borrowed addresses into kernel arguments, launch one resident B
+kernel, report health, and stop/unload that kernel.  Once READY is published,
+A output, B execution, and B completion are exchanged directly by the two
+Devices through imported VMM mappings.
+
+``WseExecutionBackend`` is the replacement boundary for a future real WSE
+runtime.  Such a backend must preserve these lifecycle semantics and consume
+Bootstrap-provided communication resources; it must not move memory ownership
+or request payload transport into this module.
+"""
 
 from __future__ import annotations
 
@@ -36,6 +48,8 @@ class BackendError(RuntimeError):
 
 
 class WseExecutionBackend(Protocol):
+    """Lifecycle capabilities required from a surrogate or real WSE backend."""
+
     backend_kind: str
 
     def initialize(self) -> dict[str, Any]: ...
@@ -48,6 +62,13 @@ class WseExecutionBackend(Protocol):
 
 
 class BServiceKernelArguments(ctypes.Structure):
+    """Host ABI matching ``pypto_b_service_0_mix_aiv`` exactly.
+
+    The first five addresses belong to the surrogate-owned local window.  The
+    next three are process-local mappings of the Attention-owned window, used
+    by the Device to write B output and completion without a Host copy.
+    """
+
     _fields_ = [
         ("local_b_input", ctypes.c_void_p),
         ("submission_signal", ctypes.c_void_p),
@@ -63,7 +84,12 @@ class BServiceKernelArguments(ctypes.Structure):
 
 
 class NpuSurrogateBackend:
-    """Control-plane owner of a surrogate's resident B kernel, not its memory."""
+    """Control-plane owner of a surrogate's resident B kernel, not its memory.
+
+    It receives only a narrow DeviceExecutionPort and borrowed window views;
+    there is intentionally no MemoryManager reference or per-request execute
+    method on this class.
+    """
 
     backend_kind = "NPU_SURROGATE"
 
@@ -85,9 +111,15 @@ class NpuSurrogateBackend:
         self._drain_result: dict[str, Any] | None = None
 
     def initialize(self) -> dict[str, Any]:
+        """Clear control state, launch B once, and wait for Device READY."""
+
         if self._kernel is not None:
             raise BackendError("backend is already initialized")
+        # VMM allocations are not guaranteed to be zeroed.  Clear only the
+        # control area before launch; no business tensor is transferred here.
         self._port.copy_host_to_device(self._local.address + WSE_CONTROL_OFFSET, bytes(6 * CACHE_LINE_BYTES))
+        # Local addresses are consumed by B.  Imported peer addresses are the
+        # destinations B uses for the B->C data and completion publication.
         arguments = BServiceKernelArguments(
             self._local.address + WSE_B_INPUT_OFFSET,
             self._local.address + WSE_B_SUBMISSION_SIGNAL_OFFSET,
@@ -117,10 +149,14 @@ class NpuSurrogateBackend:
         }
 
     def drain(self) -> dict[str, Any]:
+        """Request Device STOP, synchronize, then collect the final B report."""
+
         if self._drain_result is not None:
             return dict(self._drain_result)
         if self._kernel is None:
             raise BackendError("backend is not initialized")
+        # Memory must remain mapped until the resident loop acknowledges STOP
+        # and its stream synchronizes.  Bootstrap release occurs later.
         self._port.copy_host_to_device(
             self._local.address + WSE_LIFECYCLE_OFFSET,
             LifecycleLine(stop_requested=1).to_bytes(),
@@ -165,7 +201,12 @@ class NpuSurrogateBackend:
 
 
 class RealWseBackend:
-    """Reserved contract point; real WSE runtime integration is out of scope."""
+    """Reserved lifecycle contract point for a future real WSE implementation.
+
+    Replacing the surrogate requires an equivalent Device data-plane attach,
+    B task launch/notification mechanism, health, drain, and close.  This
+    placeholder prevents the current test from implying those are validated.
+    """
 
     backend_kind = "REAL_WSE_UNIMPLEMENTED"
 

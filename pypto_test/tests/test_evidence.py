@@ -1,6 +1,13 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
+"""Fail-closed checks for the multi-source validation evidence.
+
+The synthetic record is not execution proof.  It isolates collector policy so
+that a nonzero Host intermediate path, repeated kernel launch, leaked mapping,
+or missing B execution cannot accidentally be summarized as PASS.
+"""
+
 from __future__ import annotations
 
 from copy import deepcopy

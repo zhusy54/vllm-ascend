@@ -1,7 +1,20 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Two-process launcher for the host-local NPU/WSE-surrogate prototype."""
+"""Two-process launcher for the host-local NPU/WSE-surrogate prototype.
+
+``run_generation`` models the NPU Host service entry.  It asks Bootstrap to
+create the second Host process and data plane, then interacts only with
+PseudoPyptoDistributedService.  A complete normal generation is:
+
+    launch processes -> prepare communication -> initialize kernels
+      -> execute synchronous requests -> health -> drain -> close
+      -> Bootstrap release -> collect redacted evidence
+
+The child ``_surrogate_process`` contains the remote Host control loop.  It
+starts and stops the B backend but does not receive per-request commands; the
+resident B kernel observes those directly in Device memory.
+"""
 
 from __future__ import annotations
 
@@ -37,11 +50,15 @@ def _surrogate_process(
     ready_event: Any,
     result_queue: Any,
 ) -> None:
+    """Run the surrogate Host's bootstrap and generation control endpoint."""
+
     listener = None
     connection = None
     memory_manager = None
     backend = None
     try:
+        # The two branches vary process start order only.  Once connected, they
+        # use the same manifest, attach, and service lifecycle protocol.
         if listens:
             listener = open_control_listener(host, port)
             ready_event.set()
@@ -55,7 +72,12 @@ def _surrogate_process(
             device_id=device_id,
             generation=generation,
         )
+        # All surrogate ACL allocation/import calls occur locally in this child
+        # process.  Attention never invokes its Device Context across processes.
         resources = accept_surrogate_bootstrap(channel=channel, memory_manager=memory_manager)
+
+        # START is the last Host control action before B becomes a resident
+        # Device service.  No execute/task/payload message exists in this loop.
         message = channel.receive("START", EndpointRole.ATTENTION)
         del message
         backend = NpuSurrogateBackend(
@@ -67,6 +89,10 @@ def _surrogate_process(
         ready = backend.initialize()
         channel.send("READY", EndpointRole.WSE_SURROGATE, details=ready)
         drain_evidence: dict[str, Any] | None = None
+        # Generation control state machine:
+        #   START/READY -> HEALTH* -> DRAIN/DRAINED -> CLOSE/CLOSED
+        #   -> RELEASE/RELEASED
+        # DRAIN stops execution; RELEASE later destroys Bootstrap-owned memory.
         while True:
             message = channel.receive_any(EndpointRole.ATTENTION)
             message_type = message["type"]
@@ -79,6 +105,8 @@ def _surrogate_process(
                 backend.close()
                 channel.send("CLOSED", EndpointRole.WSE_SURROGATE)
             elif message_type == "RELEASE":
+                # Backend close was acknowledged before this branch, so no
+                # Device stream can still access either VMM mapping.
                 memory_manager.release()
                 channel.send("RELEASED", EndpointRole.WSE_SURROGATE)
                 result_queue.put(
@@ -117,7 +145,16 @@ def run_generation(
     start_order: str,
     kernel_dir: Path,
 ) -> dict[str, Any]:
+    """Execute one complete service generation and return measured evidence.
+
+    This function represents the upper software layer: after Bootstrap returns
+    a bundle it uses only the five proxy APIs.  It never reaches into the
+    surrogate process, transport implementation, or communication allocator.
+    """
+
     run_id = f"proxy-{uuid4().hex}"
+    # Bootstrap owns process construction and connection lifetime.  ``spawn``
+    # ensures the surrogate begins without an inherited ACL Device Context.
     bootstrap = BootstrapManager.launch_surrogate(
         endpoint_target=_surrogate_process,
         start_order=start_order,
@@ -129,17 +166,22 @@ def run_generation(
     )
     service = None
     try:
+        # Communication must be fully attached before either resident kernel is
+        # launched, because their arguments include imported peer addresses.
         bundle = bootstrap.prepare()
         service = PseudoPyptoDistributedService(bundle, driver_binary=kernel_dir / "abc_driver.o")
         initialization = service.initialize()
         executions = []
         for request_id, element_count in enumerate(element_counts, start=1):
+            # Different generation/request seeds make stale-slot reuse visible.
             payload = deterministic_input(
                 generation=generation,
                 request_id=request_id,
                 element_count=element_count,
             )
             result = service.execute(payload)
+            # The CPU expression is an oracle checked only after final result
+            # return; it does not participate in Device task progression.
             if result.output != expected_abc(payload):
                 raise RuntimeError(f"request {request_id} output does not match 2*x+5")
             executions.append(
@@ -157,6 +199,8 @@ def run_generation(
         drain = service.drain()
         service.close()
         service_evidence = service.evidence()
+        # Physical communication resources outlive service.close and are
+        # released only after its lease is QUIESCED.
         surrogate_evidence = bootstrap.release()
         return {
             "bootstrap": bootstrap.evidence(),

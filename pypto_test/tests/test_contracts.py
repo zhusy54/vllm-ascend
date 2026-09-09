@@ -1,6 +1,8 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
+"""Wire-layout, fixed-program, generation, and lease unit tests."""
+
 from __future__ import annotations
 
 from dataclasses import replace

@@ -1,6 +1,14 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
+"""Backend boundary tests using Host-only fakes.
+
+The fake port models lifecycle reads and kernel ownership, not Device P2P
+execution.  Assertions focus on the important boundary: the backend binds
+borrowed addresses and controls one resident kernel, but has no execute or VMM
+allocation API.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

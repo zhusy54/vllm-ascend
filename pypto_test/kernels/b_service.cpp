@@ -2,6 +2,18 @@
 // This file is a part of the vllm-ascend project.
 
 // Resident NPU surrogate for the future WSE-side fixed B task.
+//
+// This kernel validates the interface expected from a future WSE backend while
+// still running on a second Ascend NPU.  It is launched once per generation:
+//
+//   wait on local submission written by the Attention Device
+//     -> consume A output from local_b_input
+//     -> execute B(a) = 2 * a
+//     -> write B output to remote_b_output (Attention-owned VMM window)
+//     -> publish B completion directly to the Attention Device
+//
+// The surrogate Host handles only lifecycle RPC.  It does not receive an
+// execute call, copy A/B payloads, or forward the completion.
 #include "cce_aicore_intrinsics.h"
 #include <stdint.h>
 
@@ -29,6 +41,7 @@ static const KernelMeta g_b_service_meta __attribute__((used, section(".ascend.m
     {{1, sizeof(uint32_t)}, 5}, {{3, sizeof(uint32_t)}, 0, 1}};
 
 struct alignas(64) SignalLine {
+  // Descriptor/payload publication completes before this sequence changes.
   uint64_t sequence;
   uint64_t reserved[7];
 };
@@ -48,6 +61,8 @@ struct alignas(64) LifecycleLine {
   uint64_t reserved[5];
 };
 struct alignas(64) ServiceReport {
+  // Final evidence that the resident service accepted and ran B for every
+  // sequence, with no Host-side task invocation.
   uint64_t accepted;
   uint64_t completed;
   uint64_t b_runs;
@@ -77,6 +92,7 @@ __aicore__ inline uint32_t Load32(__gm__ uint32_t* address) {
 __aicore__ inline void Store64(__gm__ uint64_t* address, uint64_t value) { __builtin_cce_st_dev(value, address, 0); }
 __aicore__ inline void Store32(__gm__ uint32_t* address, uint32_t value) { __builtin_cce_st_dev(value, address, 0); }
 __aicore__ inline void PublishReport(__gm__ ServiceReport* destination, const ServiceReport& report) {
+  // Host reads this report only after STOP and stream synchronization.
   __gm__ uint64_t* output = reinterpret_cast<__gm__ uint64_t*>(destination);
   const uint64_t* input = reinterpret_cast<const uint64_t*>(&report);
   for (uint64_t index = 0; index < 16; ++index) {
@@ -94,15 +110,20 @@ extern "C" __global__ __aicore__ void pypto_b_service_0_mix_aiv(
     uint64_t generation, uint64_t max_elements) {
   ServiceReport report = {};
   uint64_t last_sequence = 0;
+  // Device-published READY confirms that the persistent submission loop is live.
   Store64(&lifecycle->ready, 1);
   dsb(DSB_ALL);
 
+  // Submission signals arrive through remote stores from the Attention NPU,
+  // not through this process's TCP control loop.
   while (Load64(&lifecycle->stop_requested) == 0) {
     ++report.submission_wait_cycles;
     const uint64_t sequence = Load64(&submission_signal->sequence);
     if (sequence <= last_sequence) {
       continue;
     }
+    // Attention published A payload and descriptor before the signal.  Fence
+    // after observing it before consuming either region.
     dsb(DSB_ALL);
     ++report.input_fences;
     const uint64_t request_generation = Load64(&submission_descriptor->generation);
@@ -125,6 +146,9 @@ extern "C" __global__ __aicore__ void pypto_b_service_0_mix_aiv(
     }
     ++report.accepted;
 
+    // Stage B reads surrogate-owned local HBM and writes its output through an
+    // imported mapping of Attention HBM.  This Store32 loop is the surrogate
+    // ->NPU Device data path being validated.
     uint64_t input_checksum = 0;
     uint64_t output_checksum = 0;
     for (uint64_t index = 0; index < elements; ++index) {
@@ -140,6 +164,10 @@ extern "C" __global__ __aicore__ void pypto_b_service_0_mix_aiv(
     }
     const uint64_t status = report.validation_errors + report.generation_errors + report.request_errors +
                             report.sequence_errors + report.checksum_errors;
+    // Publication rule for B->C:
+    //   remote B payload -> fence -> remote completion descriptor
+    //   -> fence -> remote completion signal.
+    // The Attention driver, rather than Host, consumes this notification.
     dsb(DSB_ALL);
     ++report.output_fences;
     Store64(&remote_completion_descriptor->generation, generation);
@@ -155,6 +183,8 @@ extern "C" __global__ __aicore__ void pypto_b_service_0_mix_aiv(
     last_sequence = sequence;
     PublishReport(report_address, report);
   }
+  // Acknowledge STOP before the backend synchronizes/unloads this kernel and
+  // before Bootstrap tears down either VMM mapping.
   report.stopped = 1;
   Store64(&lifecycle->stopped, 1);
   PublishReport(report_address, report);

@@ -1,6 +1,14 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
+"""Proxy API/state tests with a deterministic final-completion fake.
+
+The fake collapses Device computation into the test oracle; it does not prove
+P2P communication.  It does prove Host submission order, final-only result
+observation, single-request BUSY behavior, and lease quiescing.  The separate
+hardware matrix supplies the actual AIV/P2P evidence.
+"""
+
 from __future__ import annotations
 
 import threading

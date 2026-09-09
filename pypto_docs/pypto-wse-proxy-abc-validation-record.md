@@ -63,8 +63,8 @@ bash pypto_test/build_kernels.sh
 
 本次Kernel SHA256：
 
-- `abc_driver.o`: `7c496da2ed7fbb68b541e634588bcc0dafca4597500e354aaa29f738ba3797c0`
-- `b_service.o`: `b4a472064dbe67cf68e66153077d65f7edc6b623e248c317a432f3fe4f5ab787`
+- `abc_driver.o`: `b493bbfcd937d9bfa6eac489ec85ad2909727ac934a7d1be12849f1e341398e4`
+- `b_service.o`: `1ce6ac848b89a55817742ca12460625453762aeaa7d853b31bfc50f52a733a09`
 
 本次完整`summary.json` SHA256：
-`dbbac32d1aee03d4001f231205419f904964666ca68a8de9f5a175a47b9e2636`。
+`039e28b0ed9c177f2d1e8f2bb3f876c80a56b97a8d215db43defe0d24d4d9fdf`。

@@ -2,6 +2,20 @@
 // This file is a part of the vllm-ascend project.
 
 // Resident Attention-side driver for fixed A(NPU) -> B(remote) -> C(NPU).
+//
+// The Host launches this kernel once per generation.  It then remains alive
+// across all synchronous requests and is the Device-side dependency driver:
+//
+//   Host request signal
+//     -> read local_input and execute A(x) = x + 1
+//     -> write A output to remote_b_input (surrogate-owned VMM window)
+//     -> publish remote B descriptor and submission signal
+//     -> wait on local B completion written remotely by the surrogate Device
+//     -> read local_b_output and execute C(b) = b + 3
+//     -> publish final output/descriptor/signal for the Host
+//
+// The Host never observes A output, B input/output, or the B completion.  All
+// addresses are process-local VAs prepared by Bootstrap before kernel launch.
 #include "cce_aicore_intrinsics.h"
 #include <stdint.h>
 
@@ -32,11 +46,15 @@ static const KernelMeta g_abc_driver_meta __attribute__((used, section(".ascend.
     {{1, sizeof(uint32_t)}, 5}, {{3, sizeof(uint32_t)}, 0, 1}};
 
 struct alignas(64) SignalLine {
+  // A signal contains only a monotonically increasing publication sequence.
+  // The descriptor and payload live on separate cache lines/regions.
   uint64_t sequence;
   uint64_t reserved[7];
 };
 
 struct alignas(64) DescriptorLine {
+  // The names value3..value5 keep one 64-byte wire layout usable for request,
+  // task, and completion records.  Python contracts document each meaning.
   uint64_t generation;
   uint64_t request_id;
   uint64_t element_count;
@@ -54,6 +72,8 @@ struct alignas(64) LifecycleLine {
 };
 
 struct alignas(64) DriverReport {
+  // These counters are evidence, not inputs to scheduling.  Together they
+  // prove accepted -> A -> B submission -> B completion -> C -> completed.
   uint64_t accepted;
   uint64_t completed;
   uint64_t a_runs;
@@ -100,6 +120,8 @@ __aicore__ inline void PublishDescriptor(__gm__ DescriptorLine* descriptor, uint
 }
 
 __aicore__ inline void PublishReport(__gm__ DriverReport* destination, const DriverReport& report) {
+  // Reports are updated after each request and once more at STOP.  Host reads
+  // the final snapshot only after the resident stream has synchronized.
   __gm__ uint64_t* output = reinterpret_cast<__gm__ uint64_t*>(destination);
   const uint64_t* input = reinterpret_cast<const uint64_t*>(&report);
   for (uint64_t index = 0; index < 16; ++index) {
@@ -120,15 +142,21 @@ extern "C" __global__ __aicore__ void pypto_abc_driver_0_mix_aiv(
     uint64_t generation, uint64_t max_elements) {
   DriverReport report = {};
   uint64_t last_sequence = 0;
+  // READY is published by the Device, so service admission begins only after
+  // the resident loop and all bound addresses are actually usable.
   Store64(&lifecycle->ready, 1);
   dsb(DSB_ALL);
 
+  // STOP is checked both while idle and while waiting for B.  The first-version
+  // normal drain calls STOP only when no request is in flight.
   while (Load64(&lifecycle->stop_requested) == 0) {
     ++report.host_wait_cycles;
     const uint64_t sequence = Load64(&host_request_signal->sequence);
     if (sequence <= last_sequence) {
       continue;
     }
+    // Host writes input and descriptor before request signal.  The fence after
+    // observing a new signal orders subsequent descriptor/payload reads.
     dsb(DSB_ALL);
     const uint64_t request_generation = Load64(&host_request_descriptor->generation);
     const uint64_t request_id = Load64(&host_request_descriptor->request_id);
@@ -150,6 +178,9 @@ extern "C" __global__ __aicore__ void pypto_abc_driver_0_mix_aiv(
     }
     ++report.accepted;
 
+    // Stage A executes locally, but its output destination is an imported
+    // mapping of surrogate HBM.  Store32 therefore performs the NPU->surrogate
+    // Device data transfer without a Host copy.
     uint64_t observed_input_checksum = 0;
     uint64_t a_checksum = 0;
     for (uint64_t index = 0; index < elements; ++index) {
@@ -163,6 +194,9 @@ extern "C" __global__ __aicore__ void pypto_abc_driver_0_mix_aiv(
     if (observed_input_checksum != input_checksum) {
       ++report.checksum_errors;
     }
+    // Publication rule for A->B:
+    //   remote payload -> fence -> remote descriptor -> fence -> remote signal.
+    // B treats the signal as ownership of a complete, visible submission.
     dsb(DSB_ALL);
     ++report.output_fences;
     PublishDescriptor(remote_submission_descriptor, generation, request_id, elements, a_checksum, sequence, 0);
@@ -171,12 +205,17 @@ extern "C" __global__ __aicore__ void pypto_abc_driver_0_mix_aiv(
     dsb(DSB_ALL);
     ++report.b_submissions;
 
+    // This is the A->B->C dependency edge.  The Attention Device waits on its
+    // local completion cache line, but that line is written remotely by the
+    // surrogate Device.  No Host RPC or polling participates here.
     while (Load64(&b_completion_signal->sequence) < sequence && Load64(&lifecycle->stop_requested) == 0) {
       ++report.b_wait_cycles;
     }
     if (Load64(&lifecycle->stop_requested) != 0) {
       break;
     }
+    // B publishes output and descriptor before its completion signal.  Fence
+    // before consuming them to preserve the matching visibility order.
     dsb(DSB_ALL);
     ++report.input_fences;
     ++report.b_completions;
@@ -199,6 +238,8 @@ extern "C" __global__ __aicore__ void pypto_abc_driver_0_mix_aiv(
       ++report.sequence_errors;
     }
 
+    // Stage C consumes the B output already present in Attention-owned HBM.
+    // uint32 arithmetic deliberately wraps, matching the Python CPU oracle.
     uint64_t observed_b_checksum = 0;
     uint64_t final_checksum = 0;
     for (uint64_t index = 0; index < elements; ++index) {
@@ -214,6 +255,8 @@ extern "C" __global__ __aicore__ void pypto_abc_driver_0_mix_aiv(
     }
     const uint64_t status = report.validation_errors + report.generation_errors + report.request_errors +
                             report.sequence_errors + report.checksum_errors;
+    // Final publication rule mirrors A->B.  Only this final signal is polled by
+    // Host: C output -> fence -> completion descriptor -> fence -> signal.
     dsb(DSB_ALL);
     ++report.output_fences;
     PublishDescriptor(host_result_descriptor, generation, request_id, elements, status, final_checksum, sequence);
@@ -224,6 +267,8 @@ extern "C" __global__ __aicore__ void pypto_abc_driver_0_mix_aiv(
     last_sequence = sequence;
     PublishReport(report_address, report);
   }
+  // STOP acknowledgement is written while mappings are still valid.  The Host
+  // synchronizes this stream before Bootstrap is allowed to unmap memory.
   report.stopped = 1;
   Store64(&lifecycle->stopped, 1);
   PublishReport(report_address, report);

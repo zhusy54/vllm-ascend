@@ -1,6 +1,13 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
+"""Bootstrap contract tests that do not require an NPU.
+
+Socket pairs exercise real control framing.  Fake VMM objects verify ownership,
+range restriction, invalidation, and cleanup ordering without pretending to
+validate physical Device communication.
+"""
+
 from __future__ import annotations
 
 import socket
