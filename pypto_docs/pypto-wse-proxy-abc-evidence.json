@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "collected_at": "2026-09-09T07:59:10.979238+00:00",
+  "schema_version": 2,
+  "collected_at": "2026-09-09T12:04:14.081948+00:00",
   "status": "PASS",
   "scope": {
     "backend": "WSE",
@@ -12,14 +12,16 @@
     "transport_scope": "HOST_LOCAL"
   },
   "kernel_sha256": {
-    "abc_driver.o": "497632ec9bce626fdd6e8b25df782e26930dcba14d935a421f01274ca5aa642a",
-    "b_service.o": "440d19c3808c98a856aca1546f9dd8d02b68ce2b24505663ef9d529f0ef37990"
+    "abc_driver.o": "6a73992ccdd10bf34b6ac6e7f12c39087851bad024cf342715de5d42d5e9ca78",
+    "b_service.o": "12fbb6c350745d26885d404fc0d1cf416fa4606adc6e831ecdb489f6149ee331"
   },
-  "full_summary_sha256": "94cfc11907c9a782231707c2a0ba82a961c2abca8cab9d126f88ec817b832583",
+  "full_summary_sha256": "7f6d6247e38c7aa8270954a12c55599ca8cb3a22264fc9630d77ae5f398b67eb",
   "invariants": {
     "allocated_windows_per_endpoint_generation": 1,
+    "external_resource_injection": "PROCESS_LOCAL_SHARED_ADDRESSES_ONLY",
     "host_intermediate_bytes": 0,
     "live_mappings_after_release": 0,
+    "pypto_local_memory_released": true,
     "mappings_per_endpoint_generation": 2,
     "resident_kernel_launches_per_endpoint_generation": 1
   },

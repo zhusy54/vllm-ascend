@@ -82,6 +82,8 @@ def validate_generation(evidence: dict[str, Any], *, expected_requests: int) -> 
         raise EvidenceError("prototype must remain HOST_LOCAL")
     if evidence["endpoint_bundle"]["backend_kind"] != "WSE":
         raise EvidenceError("prototype must expose the WSE backend contract")
+    if evidence["endpoint_bundle"]["resource_injection"] != "PROCESS_LOCAL_SHARED_ADDRESSES_ONLY":
+        raise EvidenceError("PyPTO received an unexpected external resource capability")
     if evidence["resident_kernel_launches"] != {"attention": 1, "wse": 1}:
         raise EvidenceError("resident kernels were not launched exactly once")
 
@@ -90,6 +92,13 @@ def validate_generation(evidence: dict[str, Any], *, expected_requests: int) -> 
     traffic = evidence["service"]["traffic"]
     if traffic["host_intermediate_bytes"] != 0:
         raise EvidenceError("Host participated in the A/B/C intermediate path")
+    if not evidence["service"]["local_memory_released"]:
+        raise EvidenceError("NPU PyPTO backend left local memory allocated")
+    if not evidence["wse"]["pypto_execution"]["local_memory_released"]:
+        raise EvidenceError("WSE PyPTO backend left local memory allocated")
+    control_messages = set(evidence["bootstrap"]["control"]["sent_messages"])
+    if control_messages & {"EXECUTE", "A_COMPLETE", "B_COMPLETE"}:
+        raise EvidenceError("Host control RPC participated in request execution")
     driver_report = evidence["service"]["driver"]["report"]
     wse_report = evidence["wse"]["backend"]["report"]
     for report_name, report in (("driver", driver_report), ("wse", wse_report)):

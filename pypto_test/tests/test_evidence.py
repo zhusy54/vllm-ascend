@@ -33,6 +33,7 @@ def make_evidence():
     }
     return {
         "bootstrap": {
+            "control": {"sent_messages": {"START": 1, "DRAIN": 1}},
             "lease_state": "RELEASED",
             "memory": {
                 "allocated_window_count": 1,
@@ -40,11 +41,16 @@ def make_evidence():
                 "mapping_count": 2,
             },
         },
-        "endpoint_bundle": {"backend_kind": "WSE", "transport_scope": "HOST_LOCAL"},
+        "endpoint_bundle": {
+            "backend_kind": "WSE",
+            "resource_injection": "PROCESS_LOCAL_SHARED_ADDRESSES_ONLY",
+            "transport_scope": "HOST_LOCAL",
+        },
         "execution_summary": {"request_count": 1},
         "resident_kernel_launches": {"attention": 1, "wse": 1},
         "service": {
             "driver": {"report": {**report, "a_runs": 1, "c_runs": 1}},
+            "local_memory_released": True,
             "traffic": {"host_intermediate_bytes": 0},
         },
         "status": "PASS",
@@ -55,6 +61,7 @@ def make_evidence():
                 "live_mapping_count": 0,
                 "mapping_count": 2,
             },
+            "pypto_execution": {"local_memory_released": True},
         },
     }
 
@@ -108,6 +115,10 @@ def test_run_proxy_service_module_has_direct_cli(monkeypatch, tmp_path, capsys):
         (("resident_kernel_launches", "attention"), 2, "exactly once"),
         (("bootstrap", "memory", "live_mapping_count"), 1, "live mapping"),
         (("wse", "backend", "report", "b_runs"), 0, "B device"),
+        (("endpoint_bundle", "resource_injection"), "ALLOCATOR", "unexpected external"),
+        (("service", "local_memory_released"), False, "NPU PyPTO"),
+        (("wse", "pypto_execution", "local_memory_released"), False, "WSE PyPTO"),
+        (("bootstrap", "control", "sent_messages"), {"EXECUTE": 1}, "control RPC"),
     ),
 )
 def test_evidence_validator_fails_closed(path, value, match):

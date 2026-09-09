@@ -551,6 +551,8 @@ class NpuExecutionBackend:
     def evidence(self) -> dict[str, Any]:
         return {
             "driver": self._drain_result,
+            "local_memory_owner": "PSEUDO_PYPTO_NPU_BACKEND",
+            "local_memory_released": self._local is None,
             "traffic": dict(self._io.traffic) if self._io is not None else None,
         }
 
@@ -696,6 +698,13 @@ class WseBackend:
         if self._local is not None:
             self._local.close()
             self._local = None
+
+    def evidence(self) -> dict[str, Any]:
+        return {
+            "backend_kind": self.backend_kind,
+            "local_memory_owner": "PSEUDO_PYPTO_WSE_BACKEND",
+            "local_memory_released": self._local is None,
+        }
 
     def _read_lifecycle(self) -> LifecycleLine:
         if self._local is None:

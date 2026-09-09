@@ -84,6 +84,7 @@ def _wse_host_process(
                     "backend": drain_evidence,
                     "control": server.evidence(),
                     "memory": memory_provider.evidence(),
+                    "pypto_execution": backend.evidence() if backend is not None else None,
                 }
             else:
                 raise RuntimeError(f"unexpected WSE control method or state: {method}")
@@ -159,6 +160,7 @@ def run_proxy_service(
                 "layout_hash": bundle.layout.layout_hash,
                 "lease_id": bundle.lease.lease_id,
                 "max_inflight": bundle.layout.max_inflight,
+                "resource_injection": "PROCESS_LOCAL_SHARED_ADDRESSES_ONLY",
                 "transport_kind": bundle.transport_kind,
                 "transport_scope": bundle.transport_scope,
             },
