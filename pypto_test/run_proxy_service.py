@@ -26,121 +26,74 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from pypto_test.infrastructure.bootstrap import (
-    BootstrapManager,
-    ProxyControlChannel,
-    WseDeviceMemoryManager,
-    accept_wse_communication,
-    connect_control_endpoint,
-    open_control_listener,
-)
+from pypto_test.infrastructure.bootstrap import BootstrapManager, build_wse_communication, create_wse_memory_provider
+from pypto_test.infrastructure.rpc import HostControlRpcServer
+from pypto_test.pseudo_pypto.api import ExecuteRequest
 from pypto_test.pseudo_pypto.backend import WseBackend
-from pypto_test.pseudo_pypto.contracts import EndpointRole, ExecutionResult
+from pypto_test.pseudo_pypto.communication import ExecutionResult
 from pypto_test.pseudo_pypto.service import PseudoPyptoDistributedService
 from pypto_test.validation.validation_utils import get_input_payload, return_result
 
 
 def _wse_host_process(
     *,
-    host: str,
-    port: int,
-    listens: bool,
-    device_id: int,
-    generation: int,
-    run_id: str,
-    kernel_binary: str,
-    ready_event: Any,
-    result_queue: Any,
-) -> None:
+    server: HostControlRpcServer,
+    config: dict[str, Any],
+) -> dict[str, Any]:
     """Run the WSE Host bootstrap and service-lifecycle control endpoint."""
 
-    listener = None
-    connection = None
-    memory_manager = None
+    memory_provider = None
     backend = None
+    drain_evidence: dict[str, Any] | None = None
     try:
-        # The two branches vary process start order only.  Once connected, they
-        # use the same manifest, attach, and service lifecycle protocol.
-        if listens:
-            listener = open_control_listener(host, port)
-            ready_event.set()
-            connection, _ = listener.accept()
-        else:
-            connection = connect_control_endpoint(host, port)
-            ready_event.set()
-        channel = ProxyControlChannel(connection, run_id=run_id, generation=generation)
-        memory_manager = WseDeviceMemoryManager(
-            endpoint_id="wse",
-            device_id=device_id,
-            generation=generation,
+        memory_provider = create_wse_memory_provider(
+            device_id=int(config["device_id"]),
+            generation=int(config["generation"]),
         )
-        # Stage 1: initialize the WSE-side Device runtime without allocating or
-        # attaching communication memory, then report Host readiness.
-        memory_manager.initialize_runtime()
-        channel.send("WSE_HOST_READY", EndpointRole.WSE)
-
-        # Stage 3: wait until the NPU Host is also ready, then build the WSE
-        # half of the communication data plane in this process-local Context.
-        resources = accept_wse_communication(channel=channel, memory_manager=memory_manager)
-
-        # START is the last Host control action before B becomes a resident
-        # Device service.  No execute/task/payload message exists in this loop.
-        message = channel.receive("START", EndpointRole.ATTENTION)
-        del message
-        backend = WseBackend(
-            execution_port=resources.execution_port,
-            local_window=resources.local_window,
-            npu_peer_window=resources.npu_peer_window,
-            kernel_binary=Path(kernel_binary),
-        )
-        ready = backend.initialize()
-        channel.send("READY", EndpointRole.WSE, details=ready)
-        drain_evidence: dict[str, Any] | None = None
+        memory_provider.initialize_host()
+        server.emit("WSE_HOST_READY")
+        communication = None
         # Generation control state machine:
-        #   START/READY -> HEALTH* -> DRAIN/DRAINED -> CLOSE/CLOSED
-        #   -> RELEASE/RELEASED
-        # DRAIN stops execution; RELEASE later destroys Bootstrap-owned memory.
+        #   BUILD_COMMUNICATION -> START -> HEALTH* -> DRAIN -> CLOSE -> RELEASE.
+        # None of these RPC calls carries a request tensor or advances A/B/C.
         while True:
-            message = channel.receive_any(EndpointRole.ATTENTION)
-            message_type = message["type"]
-            if message_type == "HEALTH":
-                channel.send("HEALTH_REPLY", EndpointRole.WSE, details=backend.health())
-            elif message_type == "DRAIN":
-                drain_evidence = backend.drain()
-                channel.send("DRAINED", EndpointRole.WSE, details=drain_evidence)
-            elif message_type == "CLOSE":
-                backend.close()
-                channel.send("CLOSED", EndpointRole.WSE)
-            elif message_type == "RELEASE":
-                # Backend close was acknowledged before this branch, so no
-                # Device stream can still access either VMM mapping.
-                memory_manager.release()
-                channel.send("RELEASED", EndpointRole.WSE)
-                result_queue.put(
-                    {
-                        "backend": drain_evidence,
-                        "control": channel.evidence(),
-                        "memory": memory_manager.evidence(),
-                        "status": "PASS",
-                    }
+            method, fields = server.receive_call()
+            if method == "BUILD_COMMUNICATION":
+                communication, manifest = build_wse_communication(memory_provider, fields["manifest"])
+                server.reply(method, manifest=manifest.to_dict())
+            elif method == "START":
+                if communication is None:
+                    raise RuntimeError("communication must be built before WSE START")
+                backend = WseBackend(
+                    binding=communication,
+                    kernel_binary=Path(config["kernel_binary"]),
                 )
-                break
+                server.reply(method, details=backend.initialize())
+            elif method == "HEALTH" and backend is not None:
+                server.reply(method, details=backend.health())
+            elif method == "DRAIN" and backend is not None:
+                drain_evidence = backend.drain()
+                server.reply(method, details=drain_evidence)
+            elif method == "CLOSE" and backend is not None:
+                backend.close()
+                server.reply(method)
+            elif method == "RELEASE":
+                memory_provider.release()
+                server.reply(method)
+                return {
+                    "backend": drain_evidence,
+                    "control": server.evidence(),
+                    "memory": memory_provider.evidence(),
+                }
             else:
-                raise RuntimeError(f"unexpected WSE control message: {message_type}")
-    except BaseException as exc:
-        result_queue.put({"error": f"{type(exc).__name__}: {exc}", "status": "FAIL"})
-        raise
+                raise RuntimeError(f"unexpected WSE control method or state: {method}")
     finally:
         if backend is not None:
             with suppress(BaseException):
                 backend.close()
-        if memory_manager is not None:
+        if memory_provider is not None:
             with suppress(BaseException):
-                memory_manager.release()
-        if connection is not None:
-            connection.close()
-        if listener is not None:
-            listener.close()
+                memory_provider.release()
 
 
 def run_proxy_service(
@@ -177,12 +130,12 @@ def run_proxy_service(
         bootstrap.launch_npu_host()
         bundle = bootstrap.build_communication()
         service = PseudoPyptoDistributedService(bundle, driver_binary=kernel_dir / "abc_driver.o")
-        initialization = service.initialize()
+        initialization = service.initialize().to_dict()
         request_count = 0
         input_bytes = 0
         output_bytes = 0
         for input_payload in input_payloads:
-            result = service.execute(input_payload)
+            result = service.execute(ExecuteRequest(input_payload)).result
             if result_handler is not None:
                 # Result interpretation belongs to the caller.  The core run
                 # path only returns C output and never imports a test oracle.
@@ -190,8 +143,8 @@ def run_proxy_service(
             request_count += 1
             input_bytes += len(input_payload)
             output_bytes += len(result.output)
-        health = service.health()
-        drain = service.drain()
+        health = service.health().to_dict()
+        drain = service.drain().to_dict()
         service.close()
         service_evidence = service.evidence()
         # Physical communication resources outlive service.close and are

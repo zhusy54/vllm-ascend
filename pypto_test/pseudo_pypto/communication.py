@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Wire and ownership contracts for the fixed-ABC validation prototype.
+"""Device communication ABI for the fixed-ABC pseudo-PyPTO prototype.
 
 This file contains data descriptions and capability interfaces; none of the
 classes here creates a process, allocates device memory, or executes a task.
@@ -22,7 +22,6 @@ import json
 import struct
 from dataclasses import asdict, dataclass
 from enum import Enum
-from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 PROTOCOL_VERSION = 1
@@ -35,52 +34,37 @@ DEFAULT_PROGRAM_ID = "fixed-abc-v1"
 DEFAULT_TIMEOUT_SECONDS = 120.0
 DEFAULT_POLL_INTERVAL_SECONDS = 0.001
 
-# One Attention-owned VMM window contains three maximum-sized payload areas,
-# followed by cache-line-separated control records.  The separation lets each
-# producer publish a descriptor before changing its signal without two actors
-# updating the same cache line.
-#
-#   NPU window
-#   +----------------------+ NPU_INPUT_OFFSET
-#   | Host input / A input |
-#   +----------------------+ NPU_B_OUTPUT_OFFSET
-#   | B output / C input   |  written remotely by the WSE-side Device
-#   +----------------------+ NPU_FINAL_OUTPUT_OFFSET
-#   | C output             |  read by Host only after final completion
-#   +----------------------+ NPU_CONTROL_OFFSET
-#   | request/result/B-completion/lifecycle/report control lines
-#   +----------------------+
-NPU_INPUT_OFFSET = 0
-NPU_B_OUTPUT_OFFSET = MAX_PAYLOAD_BYTES
-NPU_FINAL_OUTPUT_OFFSET = 2 * MAX_PAYLOAD_BYTES
-NPU_CONTROL_OFFSET = 3 * MAX_PAYLOAD_BYTES
-NPU_HOST_REQUEST_SIGNAL_OFFSET = NPU_CONTROL_OFFSET
-NPU_HOST_REQUEST_DESC_OFFSET = NPU_CONTROL_OFFSET + CACHE_LINE_BYTES
-NPU_HOST_RESULT_SIGNAL_OFFSET = NPU_CONTROL_OFFSET + (2 * CACHE_LINE_BYTES)
-NPU_HOST_RESULT_DESC_OFFSET = NPU_CONTROL_OFFSET + (3 * CACHE_LINE_BYTES)
-NPU_B_COMPLETION_SIGNAL_OFFSET = NPU_CONTROL_OFFSET + (4 * CACHE_LINE_BYTES)
-NPU_B_COMPLETION_DESC_OFFSET = NPU_CONTROL_OFFSET + (5 * CACHE_LINE_BYTES)
-NPU_LIFECYCLE_OFFSET = NPU_CONTROL_OFFSET + (6 * CACHE_LINE_BYTES)
-NPU_REPORT_OFFSET = NPU_CONTROL_OFFSET + (7 * CACHE_LINE_BYTES)
-NPU_WINDOW_BYTES = NPU_CONTROL_OFFSET + (10 * CACHE_LINE_BYTES)
+# PyPTO-local NPU memory.  Input/final payloads and Host-facing control never
+# need remote visibility and are allocated by the NPU execution backend.
+NPU_LOCAL_INPUT_OFFSET = 0
+NPU_LOCAL_FINAL_OUTPUT_OFFSET = MAX_PAYLOAD_BYTES
+NPU_LOCAL_CONTROL_OFFSET = 2 * MAX_PAYLOAD_BYTES
+NPU_LOCAL_HOST_REQUEST_SIGNAL_OFFSET = NPU_LOCAL_CONTROL_OFFSET
+NPU_LOCAL_HOST_REQUEST_DESC_OFFSET = NPU_LOCAL_CONTROL_OFFSET + CACHE_LINE_BYTES
+NPU_LOCAL_HOST_RESULT_SIGNAL_OFFSET = NPU_LOCAL_CONTROL_OFFSET + (2 * CACHE_LINE_BYTES)
+NPU_LOCAL_HOST_RESULT_DESC_OFFSET = NPU_LOCAL_CONTROL_OFFSET + (3 * CACHE_LINE_BYTES)
+NPU_LOCAL_LIFECYCLE_OFFSET = NPU_LOCAL_CONTROL_OFFSET + (4 * CACHE_LINE_BYTES)
+NPU_LOCAL_REPORT_OFFSET = NPU_LOCAL_CONTROL_OFFSET + (5 * CACHE_LINE_BYTES)
+NPU_LOCAL_WINDOW_BYTES = NPU_LOCAL_CONTROL_OFFSET + (8 * CACHE_LINE_BYTES)
 
-# The WSE-owned window needs only the A output/B input payload and the B
-# submission control.  B writes its output and completion directly into the
-# imported Attention window, so there is no WSE-Host result buffer.
-#
-#   WSE window
-#   +----------------------+ WSE_B_INPUT_OFFSET
-#   | A output / B input   |  written remotely by the Attention Device
-#   +----------------------+ WSE_CONTROL_OFFSET
-#   | B submission/lifecycle/report control lines
-#   +----------------------+
-WSE_B_INPUT_OFFSET = 0
-WSE_CONTROL_OFFSET = MAX_PAYLOAD_BYTES
-WSE_B_SUBMISSION_SIGNAL_OFFSET = WSE_CONTROL_OFFSET
-WSE_B_SUBMISSION_DESC_OFFSET = WSE_CONTROL_OFFSET + CACHE_LINE_BYTES
-WSE_LIFECYCLE_OFFSET = WSE_CONTROL_OFFSET + (2 * CACHE_LINE_BYTES)
-WSE_REPORT_OFFSET = WSE_CONTROL_OFFSET + (3 * CACHE_LINE_BYTES)
-WSE_WINDOW_BYTES = WSE_CONTROL_OFFSET + (6 * CACHE_LINE_BYTES)
+# Externally provisioned NPU-owned communication memory.  The WSE Device
+# writes B output then completion descriptor/signal directly into this window.
+NPU_SHARED_B_OUTPUT_OFFSET = 0
+NPU_SHARED_B_COMPLETION_SIGNAL_OFFSET = MAX_PAYLOAD_BYTES
+NPU_SHARED_B_COMPLETION_DESC_OFFSET = MAX_PAYLOAD_BYTES + CACHE_LINE_BYTES
+NPU_SHARED_WINDOW_BYTES = MAX_PAYLOAD_BYTES + (3 * CACHE_LINE_BYTES)
+
+# Externally provisioned WSE-owned communication memory.  The NPU Device
+# writes A output then B submission descriptor/signal directly into this window.
+WSE_SHARED_B_INPUT_OFFSET = 0
+WSE_SHARED_B_SUBMISSION_SIGNAL_OFFSET = MAX_PAYLOAD_BYTES
+WSE_SHARED_B_SUBMISSION_DESC_OFFSET = MAX_PAYLOAD_BYTES + CACHE_LINE_BYTES
+WSE_SHARED_WINDOW_BYTES = MAX_PAYLOAD_BYTES + (3 * CACHE_LINE_BYTES)
+
+# PyPTO-local WSE lifecycle/report memory is not remotely accessible.
+WSE_LOCAL_LIFECYCLE_OFFSET = 0
+WSE_LOCAL_REPORT_OFFSET = CACHE_LINE_BYTES
+WSE_LOCAL_WINDOW_BYTES = 3 * CACHE_LINE_BYTES
 
 _U64_LINE = struct.Struct("<QQQQQQQQ")
 _REPORT = struct.Struct("<" + ("Q" * 16))
@@ -164,8 +148,10 @@ class ProxyBufferLayout:
     kernel compiled for one offset scheme from attaching to another scheme.
     """
 
-    npu_window_bytes: int = NPU_WINDOW_BYTES
-    wse_window_bytes: int = WSE_WINDOW_BYTES
+    npu_local_window_bytes: int = NPU_LOCAL_WINDOW_BYTES
+    npu_shared_window_bytes: int = NPU_SHARED_WINDOW_BYTES
+    wse_local_window_bytes: int = WSE_LOCAL_WINDOW_BYTES
+    wse_shared_window_bytes: int = WSE_SHARED_WINDOW_BYTES
     max_payload_bytes: int = MAX_PAYLOAD_BYTES
     max_inflight: int = MAX_INFLIGHT
 
@@ -184,61 +170,52 @@ EXPECTED_LAYOUT_HASH = DEFAULT_LAYOUT.layout_hash
 
 
 @dataclass(frozen=True)
-class BorrowedWindowView:
-    """Process-local Device VA borrowed from Bootstrap.
+class NpuCommunicationBinding:
+    """NPU-process Device addresses injected by the external provider.
 
-    The view deliberately has no close/free method.  Its address is meaningful
-    only in the process whose MemoryManager created or imported the mapping.
+    Both bases are local to the NPU Host process: ``local_shared_base`` maps
+    NPU-owned physical memory and ``peer_shared_base`` maps WSE-owned memory.
+    PyPTO derives its fixed ABI addresses from these bases and never frees them.
     """
 
-    owner: EndpointRole
-    buffer_id: str
     generation: int
-    address: int
-    logical_bytes: int
-    mapping_bytes: int
+    local_shared_base: int
+    local_shared_bytes: int
+    peer_shared_base: int
+    peer_shared_bytes: int
 
-    def validate(self, *, generation: int, minimum_bytes: int) -> None:
-        if self.generation != generation:
-            raise ContractError(f"{self.buffer_id} generation mismatch")
-        if self.address <= 0:
-            raise ContractError(f"{self.buffer_id} address must be positive")
-        if self.logical_bytes < minimum_bytes or self.mapping_bytes < self.logical_bytes:
-            raise ContractError(f"{self.buffer_id} is smaller than the required layout")
-
-
-@runtime_checkable
-class KernelSession(Protocol):
-    @property
-    def binary_sha256(self) -> str: ...
-
-    @property
-    def closed(self) -> bool: ...
-
-    def synchronize(self) -> int: ...
-
-    def close(self) -> None: ...
+    def validate(self) -> None:
+        _validate_binding(
+            self.generation,
+            self.local_shared_base,
+            self.local_shared_bytes,
+            NPU_SHARED_WINDOW_BYTES,
+            self.peer_shared_base,
+            self.peer_shared_bytes,
+            WSE_SHARED_WINDOW_BYTES,
+        )
 
 
-@runtime_checkable
-class DeviceExecutionPort(Protocol):
-    """Narrow capability used by proxy/backend code after bootstrap.
+@dataclass(frozen=True)
+class WseCommunicationBinding:
+    """WSE-process Device addresses injected by the external provider."""
 
-    It permits bounded copies and kernel launch, but has no VMM
-    allocate/import/map/free methods.  Resource ownership therefore cannot
-    accidentally migrate into the service layer.
-    """
+    generation: int
+    local_shared_base: int
+    local_shared_bytes: int
+    peer_shared_base: int
+    peer_shared_bytes: int
 
-    @property
-    def generation(self) -> int: ...
-
-    def copy_host_to_device(self, destination: int, payload: bytes) -> None: ...
-
-    def copy_device_to_host(self, source: int, size: int) -> bytes: ...
-
-    def launch_kernel(self, binary_path: Path, arguments: Any) -> KernelSession: ...
-
-    def invalidate(self) -> None: ...
+    def validate(self) -> None:
+        _validate_binding(
+            self.generation,
+            self.local_shared_base,
+            self.local_shared_bytes,
+            WSE_SHARED_WINDOW_BYTES,
+            self.peer_shared_base,
+            self.peer_shared_bytes,
+            NPU_SHARED_WINDOW_BYTES,
+        )
 
 
 @runtime_checkable
@@ -288,12 +265,7 @@ class BootstrapLease:
 
 @dataclass(frozen=True)
 class EndpointBundle:
-    """Capabilities lent by Bootstrap to one proxy service generation.
-
-    This is a context object, not an active runtime module.  It groups the two
-    process-local window views, an execution port, lifecycle control, and the
-    lease that proves the resources are still valid.
-    """
+    """External resources injected into one NPU-side PyPTO service."""
 
     generation: int
     endpoint_id: str
@@ -301,9 +273,7 @@ class EndpointBundle:
     transport_kind: str
     transport_scope: str
     layout: ProxyBufferLayout
-    execution_port: DeviceExecutionPort
-    npu_local_window: BorrowedWindowView
-    wse_peer_window: BorrowedWindowView
+    npu_communication: NpuCommunicationBinding
     wse_control: WseServiceControl
     lease: BootstrapLease
 
@@ -316,13 +286,12 @@ class EndpointBundle:
             raise ContractError("only the WSE backend is supported")
         if self.transport_scope != "HOST_LOCAL":
             raise ContractError("only HOST_LOCAL transport scope is supported")
-        if self.execution_port.generation != self.generation:
-            raise ContractError("execution port generation mismatch")
         if self.lease.generation != self.generation or not self.lease.active:
             raise ContractError("bootstrap lease is stale or released")
         self.layout.validate()
-        self.npu_local_window.validate(generation=self.generation, minimum_bytes=NPU_WINDOW_BYTES)
-        self.wse_peer_window.validate(generation=self.generation, minimum_bytes=WSE_WINDOW_BYTES)
+        self.npu_communication.validate()
+        if self.npu_communication.generation != self.generation:
+            raise ContractError("communication binding generation mismatch")
 
 
 @dataclass(frozen=True)
@@ -585,3 +554,37 @@ def _validate_common_descriptor(generation: int, request_id: int, element_count:
 def _validate_uint32_payload(payload: bytes) -> None:
     if not payload or len(payload) > MAX_PAYLOAD_BYTES or len(payload) % UINT32_BYTES:
         raise ContractError("payload must contain 1..MAX_ELEMENTS little-endian uint32 values")
+
+
+def _validate_binding(
+    generation: int,
+    local_base: int,
+    local_bytes: int,
+    minimum_local_bytes: int,
+    peer_base: int,
+    peer_bytes: int,
+    minimum_peer_bytes: int,
+) -> None:
+    if generation <= 0:
+        raise ContractError("communication generation must be positive")
+    if local_base <= 0 or peer_base <= 0:
+        raise ContractError("communication Device addresses must be positive")
+    if local_bytes < minimum_local_bytes or peer_bytes < minimum_peer_bytes:
+        raise ContractError("communication window is smaller than the fixed ABI")
+
+
+def _validate_binding(
+    generation: int,
+    local_base: int,
+    local_bytes: int,
+    required_local_bytes: int,
+    peer_base: int,
+    peer_bytes: int,
+    required_peer_bytes: int,
+) -> None:
+    if generation <= 0:
+        raise ContractError("communication generation must be positive")
+    if local_base <= 0 or peer_base <= 0:
+        raise ContractError("communication addresses must be positive process-local Device VAs")
+    if local_bytes < required_local_bytes or peer_bytes < required_peer_bytes:
+        raise ContractError("communication mapping is smaller than the fixed ABI")

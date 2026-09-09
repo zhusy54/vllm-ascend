@@ -1,13 +1,7 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Proxy API/state tests with a deterministic final-completion fake.
-
-The fake collapses Device computation into the test oracle; it does not prove
-P2P communication.  It does prove Host submission order, final-only result
-observation, single-request BUSY behavior, and lease quiescing.  The separate
-hardware matrix supplies the actual AIV/P2P evidence.
-"""
+"""Typed service API and PyPTO-owned Host-IO tests."""
 
 from __future__ import annotations
 
@@ -16,23 +10,26 @@ from pathlib import Path
 
 import pytest
 
-from pypto_test.pseudo_pypto.contracts import (
+from pypto_test.pseudo_pypto.api import ExecuteRequest
+from pypto_test.pseudo_pypto.communication import (
     DEFAULT_LAYOUT,
-    NPU_FINAL_OUTPUT_OFFSET,
-    NPU_HOST_REQUEST_DESC_OFFSET,
-    NPU_HOST_REQUEST_SIGNAL_OFFSET,
-    NPU_HOST_RESULT_DESC_OFFSET,
-    NPU_HOST_RESULT_SIGNAL_OFFSET,
-    NPU_LIFECYCLE_OFFSET,
-    NPU_REPORT_OFFSET,
+    NPU_LOCAL_FINAL_OUTPUT_OFFSET,
+    NPU_LOCAL_HOST_REQUEST_DESC_OFFSET,
+    NPU_LOCAL_HOST_REQUEST_SIGNAL_OFFSET,
+    NPU_LOCAL_HOST_RESULT_DESC_OFFSET,
+    NPU_LOCAL_HOST_RESULT_SIGNAL_OFFSET,
+    NPU_LOCAL_INPUT_OFFSET,
+    NPU_LOCAL_LIFECYCLE_OFFSET,
+    NPU_LOCAL_REPORT_OFFSET,
+    NPU_SHARED_WINDOW_BYTES,
+    WSE_SHARED_WINDOW_BYTES,
     BootstrapLease,
-    BorrowedWindowView,
     CompletionDescriptor,
     EndpointBundle,
-    EndpointRole,
     HostRequestDescriptor,
     LeaseState,
     LifecycleLine,
+    NpuCommunicationBinding,
     ServiceError,
     SignalLine,
     checksum_u32,
@@ -41,9 +38,21 @@ from pypto_test.pseudo_pypto.service import PseudoPyptoDistributedService
 from pypto_test.validation.validation_utils import expected_abc, get_input_payload
 
 
+class FakeBuffer:
+    def __init__(self, address, size):
+        self.address = address
+        self.size = size
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
 class FakeKernel:
     binary_sha256 = "driver-sha"
-    closed = False
+
+    def __init__(self):
+        self.closed = False
 
     def synchronize(self):
         return 456
@@ -66,12 +75,12 @@ class FakeRemoteControl:
         self.closed = True
 
 
-class FakePort:
-    generation = 1
+class CompletingRuntime:
+    """Models final Device publication, not the intermediate A/B path."""
 
-    def __init__(self, base):
-        self.base = base
-        self.memory = bytearray(4 * 1024 * 1024)
+    def __init__(self):
+        self.base = 1_000_000
+        self.memory = bytearray(16 * 1024 * 1024)
         self.kernel = FakeKernel()
         self.writes = []
         self.ready = False
@@ -79,26 +88,28 @@ class FakePort:
         self.auto_complete = True
         self.request_submitted = threading.Event()
 
+    def allocate_local(self, size):
+        self.buffer = FakeBuffer(self.base, size)
+        return self.buffer
+
     def copy_host_to_device(self, destination, payload):
-        offset = destination - self.base
-        self.memory[offset : offset + len(payload)] = payload
-        self.writes.append((offset, len(payload)))
-        if offset == NPU_HOST_REQUEST_SIGNAL_OFFSET and len(payload) == 64:
+        self.memory[destination : destination + len(payload)] = payload
+        self.writes.append((destination, len(payload)))
+        if destination == self.base + NPU_LOCAL_HOST_REQUEST_SIGNAL_OFFSET and len(payload) == 64:
             self.request_submitted.set()
             if self.auto_complete:
-                self._complete_request()
-        elif offset == NPU_LIFECYCLE_OFFSET:
+                self.complete_request()
+        elif destination == self.base + NPU_LOCAL_LIFECYCLE_OFFSET and len(payload) == 64:
             self.stopped = True
 
     def copy_device_to_host(self, source, size):
-        offset = source - self.base
-        if offset == NPU_LIFECYCLE_OFFSET:
+        if source == self.base + NPU_LOCAL_LIFECYCLE_OFFSET:
             return LifecycleLine(
                 stop_requested=int(self.stopped),
                 stopped=int(self.stopped),
                 ready=int(self.ready),
             ).to_bytes()
-        return bytes(self.memory[offset : offset + size])
+        return bytes(self.memory[source : source + size])
 
     def launch_kernel(self, binary_path, arguments):
         self.binary_path = binary_path
@@ -106,16 +117,22 @@ class FakePort:
         self.ready = True
         return self.kernel
 
-    def invalidate(self):
-        pass
-
-    def _complete_request(self):
+    def complete_request(self):
         descriptor = HostRequestDescriptor.from_bytes(
-            bytes(self.memory[NPU_HOST_REQUEST_DESC_OFFSET : NPU_HOST_REQUEST_DESC_OFFSET + 64])
+            bytes(
+                self.memory[
+                    self.base
+                    + NPU_LOCAL_HOST_REQUEST_DESC_OFFSET : self.base
+                    + NPU_LOCAL_HOST_REQUEST_DESC_OFFSET
+                    + 64
+                ]
+            )
         )
         size = descriptor.element_count * 4
-        output = expected_abc(bytes(self.memory[:size]))
-        self.memory[NPU_FINAL_OUTPUT_OFFSET : NPU_FINAL_OUTPUT_OFFSET + size] = output
+        payload = bytes(self.memory[self.base + NPU_LOCAL_INPUT_OFFSET : self.base + NPU_LOCAL_INPUT_OFFSET + size])
+        output = expected_abc(payload)
+        final_start = self.base + NPU_LOCAL_FINAL_OUTPUT_OFFSET
+        self.memory[final_start : final_start + size] = output
         completion = CompletionDescriptor(
             descriptor.generation,
             descriptor.request_id,
@@ -124,16 +141,16 @@ class FakePort:
             checksum_u32(output),
             descriptor.sequence,
         )
-        self.memory[NPU_HOST_RESULT_DESC_OFFSET : NPU_HOST_RESULT_DESC_OFFSET + 64] = completion.to_bytes()
-        self.memory[NPU_HOST_RESULT_SIGNAL_OFFSET : NPU_HOST_RESULT_SIGNAL_OFFSET + 64] = SignalLine(
-            descriptor.sequence
-        ).to_bytes()
-        self.memory[NPU_REPORT_OFFSET : NPU_REPORT_OFFSET + 128] = bytes(128)
+        descriptor_start = self.base + NPU_LOCAL_HOST_RESULT_DESC_OFFSET
+        signal_start = self.base + NPU_LOCAL_HOST_RESULT_SIGNAL_OFFSET
+        self.memory[descriptor_start : descriptor_start + 64] = completion.to_bytes()
+        self.memory[signal_start : signal_start + 64] = SignalLine(descriptor.sequence).to_bytes()
+        report_start = self.base + NPU_LOCAL_REPORT_OFFSET
+        self.memory[report_start : report_start + 128] = bytes(128)
 
 
 def make_service():
-    base = 1000
-    port = FakePort(base)
+    runtime = CompletingRuntime()
     remote = FakeRemoteControl()
     lease = BootstrapLease("lease", 1)
     lease.borrow()
@@ -144,53 +161,57 @@ def make_service():
         "FAKE",
         "HOST_LOCAL",
         DEFAULT_LAYOUT,
-        port,
-        BorrowedWindowView(EndpointRole.ATTENTION, "npu", 1, base, 4 * 1024 * 1024, 4 * 1024 * 1024),
-        BorrowedWindowView(EndpointRole.WSE, "wse", 1, 8_000_000, 2 * 1024 * 1024, 2 * 1024 * 1024),
+        NpuCommunicationBinding(1, 4_000_000, NPU_SHARED_WINDOW_BYTES, 6_000_000, WSE_SHARED_WINDOW_BYTES),
         remote,
         lease,
     )
-    return PseudoPyptoDistributedService(bundle, driver_binary=Path("driver.o"), timeout_seconds=0.1), port, lease
+    service = PseudoPyptoDistributedService(
+        bundle,
+        driver_binary=Path("driver.o"),
+        execution_runtime=runtime,
+    )
+    return service, runtime, lease
 
 
 def test_service_runs_fixed_abc_with_no_host_intermediate_progress():
-    service, port, lease = make_service()
-    initialized = service.initialize()
-    assert initialized["state"] == "READY"
+    service, runtime, lease = make_service()
+    assert service.initialize().state.value == "READY"
     payload = get_input_payload(generation=1, request_id=1, element_count=32)
-    result = service.execute(payload)
+    result = service.execute(ExecuteRequest(payload)).result
     assert result.output == expected_abc(payload)
-    request_submissions = [item for item in port.writes if item == (NPU_HOST_REQUEST_SIGNAL_OFFSET, 64)]
+    request_signal = runtime.base + NPU_LOCAL_HOST_REQUEST_SIGNAL_OFFSET
+    request_submissions = [item for item in runtime.writes if item == (request_signal, 64)]
     assert len(request_submissions) == 1
     assert service.evidence()["traffic"]["host_intermediate_bytes"] == 0
-    assert service.health()["state"] == "READY"
+    assert service.health().state.value == "READY"
     service.drain()
     service.close()
     assert lease.state is LeaseState.QUIESCED
-    assert port.kernel.closed
+    assert runtime.kernel.closed
+    assert runtime.buffer.closed
 
 
 def test_service_rejects_execute_before_initialize():
     service, _, _ = make_service()
     with pytest.raises(ServiceError, match="NEW"):
-        service.execute(bytes(4))
+        service.execute(ExecuteRequest(bytes(4)))
 
 
 def test_service_rejects_second_request_while_busy():
-    service, port, _ = make_service()
+    service, runtime, _ = make_service()
     service.initialize()
-    port.auto_complete = False
+    runtime.auto_complete = False
     payload = get_input_payload(generation=1, request_id=1, element_count=4)
-    result = []
-    worker = threading.Thread(target=lambda: result.append(service.execute(payload)))
+    results = []
+    worker = threading.Thread(target=lambda: results.append(service.execute(ExecuteRequest(payload))))
     worker.start()
-    assert port.request_submitted.wait(1)
+    assert runtime.request_submitted.wait(1)
     with pytest.raises(ServiceError, match="EXECUTING"):
-        service.execute(payload)
-    port._complete_request()
+        service.execute(ExecuteRequest(payload))
+    runtime.complete_request()
     worker.join(1)
     assert not worker.is_alive()
-    assert result[0].output == expected_abc(payload)
+    assert results[0].result.output == expected_abc(payload)
     service.close()
 
 
@@ -200,4 +221,4 @@ def test_close_is_idempotent_and_prevents_execute():
     service.close()
     service.close()
     with pytest.raises(ServiceError, match="CLOSED"):
-        service.execute(bytes(4))
+        service.execute(ExecuteRequest(bytes(4)))

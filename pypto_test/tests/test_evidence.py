@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 import pypto_test.run_proxy_service as proxy_entry
-from pypto_test.pseudo_pypto.contracts import ExecutionResult, checksum_u32
+from pypto_test.pseudo_pypto.communication import ExecutionResult, checksum_u32
 from pypto_test.validation.collect_evidence import EvidenceError, validate_generation
 from pypto_test.validation.validation_utils import expected_abc, get_input_payload, return_result
 

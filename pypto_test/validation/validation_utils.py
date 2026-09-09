@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import struct
 
-from pypto_test.pseudo_pypto.contracts import MAX_ELEMENTS, ExecutionResult
+from pypto_test.pseudo_pypto.communication import MAX_ELEMENTS, ExecutionResult
 
 
 class ResultValidationError(RuntimeError):

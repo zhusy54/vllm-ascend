@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Wire-layout, fixed-program, generation, and lease unit tests."""
+"""Public API, Device ABI, generation, and lease unit tests."""
 
 from __future__ import annotations
 
@@ -9,24 +9,26 @@ from dataclasses import replace
 
 import pytest
 
-from pypto_test.pseudo_pypto.contracts import (
+from pypto_test.pseudo_pypto.api import ExecuteRequest, PyptoDistributedService
+from pypto_test.pseudo_pypto.communication import (
     ABC_TASKS,
     CACHE_LINE_BYTES,
     DEFAULT_LAYOUT,
     EXPECTED_LAYOUT_HASH,
     MAX_ELEMENTS,
-    NPU_WINDOW_BYTES,
-    WSE_WINDOW_BYTES,
+    NPU_LOCAL_WINDOW_BYTES,
+    NPU_SHARED_WINDOW_BYTES,
+    WSE_LOCAL_WINDOW_BYTES,
+    WSE_SHARED_WINDOW_BYTES,
     BootstrapLease,
-    BorrowedWindowView,
     CompletionDescriptor,
     ContractError,
     DriverReport,
     EndpointBundle,
-    EndpointRole,
     HostRequestDescriptor,
     LeaseState,
     LifecycleLine,
+    NpuCommunicationBinding,
     PseudoProgramSpec,
     RemoteTaskDescriptor,
     ServiceReport,
@@ -36,13 +38,15 @@ from pypto_test.pseudo_pypto.contracts import (
 from pypto_test.validation.validation_utils import expected_abc, get_input_payload
 
 
-def test_fixed_program_and_layout_are_stable():
+def test_fixed_program_and_split_memory_layout_are_stable():
     spec = PseudoProgramSpec()
     spec.validate()
     assert spec.tasks == ABC_TASKS
     assert DEFAULT_LAYOUT.layout_hash == EXPECTED_LAYOUT_HASH
-    assert NPU_WINDOW_BYTES > 3 * 1024 * 1024
-    assert WSE_WINDOW_BYTES > 1024 * 1024
+    assert NPU_LOCAL_WINDOW_BYTES > 2 * 1024 * 1024
+    assert NPU_SHARED_WINDOW_BYTES > 1024 * 1024
+    assert WSE_SHARED_WINDOW_BYTES > 1024 * 1024
+    assert WSE_LOCAL_WINDOW_BYTES < 1024
 
 
 @pytest.mark.parametrize(
@@ -60,18 +64,14 @@ def test_program_rejects_non_abc_contracts(spec):
 
 
 def test_control_descriptors_round_trip_as_cache_lines():
-    request = HostRequestDescriptor(1, 2, 3, 4, 5)
-    remote = RemoteTaskDescriptor(1, 2, 3, 4, 5)
-    completion = CompletionDescriptor(1, 2, 3, 0, 4, 5)
-    signal = SignalLine(5)
-    lifecycle = LifecycleLine(stop_requested=1, stopped=0, ready=1)
-    for value, decoder in (
-        (request, HostRequestDescriptor.from_bytes),
-        (remote, RemoteTaskDescriptor.from_bytes),
-        (completion, CompletionDescriptor.from_bytes),
-        (signal, SignalLine.from_bytes),
-        (lifecycle, LifecycleLine.from_bytes),
-    ):
+    values = (
+        (HostRequestDescriptor(1, 2, 3, 4, 5), HostRequestDescriptor.from_bytes),
+        (RemoteTaskDescriptor(1, 2, 3, 4, 5), RemoteTaskDescriptor.from_bytes),
+        (CompletionDescriptor(1, 2, 3, 0, 4, 5), CompletionDescriptor.from_bytes),
+        (SignalLine(5), SignalLine.from_bytes),
+        (LifecycleLine(stop_requested=1, ready=1), LifecycleLine.from_bytes),
+    )
+    for value, decoder in values:
         payload = value.to_bytes()
         assert len(payload) == CACHE_LINE_BYTES
         assert decoder(payload) == value
@@ -98,43 +98,21 @@ def test_device_report_wire_sizes_are_stable():
     assert ServiceReport.from_bytes(payload).completed == 0
 
 
-class ContractFakePort:
-    generation = 2
-
-    def invalidate(self):
-        pass
-
-
-class ContractFakeControl:
-    pass
-
-
-def test_endpoint_bundle_rejects_generation_and_released_lease():
+def test_endpoint_bundle_accepts_addresses_but_no_allocator_or_copy_capability():
     lease = BootstrapLease("lease", 1)
     lease.borrow()
-    bundle = EndpointBundle(
-        1,
-        "attention",
-        "WSE",
-        "FAKE",
-        "HOST_LOCAL",
-        DEFAULT_LAYOUT,
-        ContractFakePort(),
-        BorrowedWindowView(EndpointRole.ATTENTION, "npu", 1, 1, NPU_WINDOW_BYTES, NPU_WINDOW_BYTES),
-        BorrowedWindowView(EndpointRole.WSE, "wse", 1, 2, WSE_WINDOW_BYTES, WSE_WINDOW_BYTES),
-        ContractFakeControl(),
-        lease,
-    )
-    with pytest.raises(ContractError, match="execution port generation"):
-        bundle.validate()
+    binding = NpuCommunicationBinding(1, 1, NPU_SHARED_WINDOW_BYTES, 2, WSE_SHARED_WINDOW_BYTES)
+    bundle = EndpointBundle(1, "attention", "WSE", "FAKE", "HOST_LOCAL", DEFAULT_LAYOUT, binding, object(), lease)
+    bundle.validate()
+    assert not hasattr(bundle, "execution_port")
+    assert not hasattr(bundle, "memory_provider")
     lease.quiesce()
     lease.release()
     assert lease.state is LeaseState.RELEASED
     with pytest.raises(ContractError, match="lease"):
-        replace(bundle, execution_port=replace_port_generation(1)).validate()
+        bundle.validate()
 
 
-def replace_port_generation(generation):
-    port = ContractFakePort()
-    port.generation = generation
-    return port
+def test_service_api_is_typed_and_runtime_checkable():
+    assert ExecuteRequest(bytes(4)).payload == bytes(4)
+    assert PyptoDistributedService is not None

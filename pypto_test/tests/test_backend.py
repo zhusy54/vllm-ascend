@@ -1,31 +1,40 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
 # This file is a part of the vllm-ascend project.
 
-"""Backend boundary tests using Host-only fakes.
-
-The fake port models lifecycle reads and kernel ownership, not Device P2P
-execution.  Assertions focus on the important boundary: the backend binds
-borrowed addresses and controls one resident kernel, but has no execute or VMM
-allocation API.
-"""
+"""PyPTO execution-backend tests using an addressable Host-only runtime."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from pypto_test.pseudo_pypto.backend import WseBackend
-from pypto_test.pseudo_pypto.contracts import (
+from pypto_test.pseudo_pypto.backend import NpuExecutionBackend, WseBackend
+from pypto_test.pseudo_pypto.communication import (
     CACHE_LINE_BYTES,
-    WSE_LIFECYCLE_OFFSET,
-    BorrowedWindowView,
-    EndpointRole,
+    NPU_LOCAL_LIFECYCLE_OFFSET,
+    NPU_SHARED_WINDOW_BYTES,
+    WSE_LOCAL_LIFECYCLE_OFFSET,
+    WSE_SHARED_WINDOW_BYTES,
     LifecycleLine,
+    NpuCommunicationBinding,
+    WseCommunicationBinding,
 )
 
 
+class FakeBuffer:
+    def __init__(self, address, size):
+        self.address = address
+        self.size = size
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
 class FakeKernel:
-    binary_sha256 = "abc"
-    closed = False
+    binary_sha256 = "kernel-sha"
+
+    def __init__(self):
+        self.closed = False
 
     def synchronize(self):
         return 123
@@ -34,51 +43,72 @@ class FakeKernel:
         self.closed = True
 
 
-class FakePort:
-    generation = 7
-
-    def __init__(self):
+class FakeRuntime:
+    def __init__(self, local_base):
+        self.local_base = local_base
+        self.memory = bytearray(16 * 1024 * 1024)
         self.kernel = FakeKernel()
         self.writes = []
         self.stopping = False
 
+    def allocate_local(self, size):
+        self.buffer = FakeBuffer(self.local_base, size)
+        return self.buffer
+
     def copy_host_to_device(self, destination, payload):
-        self.writes.append((destination, payload))
-        if destination == 1000 + WSE_LIFECYCLE_OFFSET:
+        self.memory[destination : destination + len(payload)] = payload
+        self.writes.append((destination, len(payload)))
+        if len(payload) == CACHE_LINE_BYTES and destination in (
+            self.local_base + NPU_LOCAL_LIFECYCLE_OFFSET,
+            self.local_base + WSE_LOCAL_LIFECYCLE_OFFSET,
+        ) and LifecycleLine.from_bytes(payload).stop_requested:
             self.stopping = True
 
     def copy_device_to_host(self, source, size):
-        if source == 1000 + WSE_LIFECYCLE_OFFSET:
-            return LifecycleLine(stop_requested=int(self.stopping), stopped=int(self.stopping), ready=1).to_bytes()
-        return bytes(size)
+        if source in (
+            self.local_base + NPU_LOCAL_LIFECYCLE_OFFSET,
+            self.local_base + WSE_LOCAL_LIFECYCLE_OFFSET,
+        ):
+            return LifecycleLine(
+                stop_requested=int(self.stopping),
+                stopped=int(self.stopping),
+                ready=1,
+            ).to_bytes()
+        return bytes(self.memory[source : source + size])
 
     def launch_kernel(self, binary_path, arguments):
         self.binary_path = binary_path
         self.arguments = arguments
         return self.kernel
 
-    def invalidate(self):
-        pass
+
+def test_npu_backend_owns_local_memory_io_and_driver():
+    runtime = FakeRuntime(local_base=1_000_000)
+    binding = NpuCommunicationBinding(7, 4_000_000, NPU_SHARED_WINDOW_BYTES, 6_000_000, WSE_SHARED_WINDOW_BYTES)
+    backend = NpuExecutionBackend(binding=binding, kernel_binary=Path("abc_driver.o"), runtime=runtime)
+    ready = backend.initialize()
+    assert ready["binary_sha256"] == "kernel-sha"
+    assert runtime.arguments.local_b_output == binding.local_shared_base
+    assert runtime.arguments.remote_b_input == binding.peer_shared_base
+    assert not hasattr(backend, "allocate_shared_window")
+    backend.drain()
+    backend.close()
+    assert runtime.buffer.closed
+    assert runtime.kernel.closed
 
 
-def test_wse_backend_only_controls_resident_kernel():
-    port = FakePort()
-    local = BorrowedWindowView(EndpointRole.WSE, "wse", 7, 1000, 2**20, 2**21)
-    peer = BorrowedWindowView(EndpointRole.ATTENTION, "npu", 7, 10_000_000, 4 * 2**20, 4 * 2**20)
-    backend = WseBackend(
-        execution_port=port,
-        local_window=local,
-        npu_peer_window=peer,
-        kernel_binary=Path("b_service.o"),
-        timeout_seconds=0.1,
-    )
+def test_wse_backend_binds_injected_shared_addresses_and_local_control():
+    runtime = FakeRuntime(local_base=2_000_000)
+    binding = WseCommunicationBinding(7, 6_000_000, WSE_SHARED_WINDOW_BYTES, 4_000_000, NPU_SHARED_WINDOW_BYTES)
+    backend = WseBackend(binding=binding, kernel_binary=Path("b_service.o"), runtime=runtime)
     ready = backend.initialize()
     assert ready["backend_kind"] == "WSE"
-    assert port.arguments.local_b_input == local.address
+    assert runtime.arguments.local_b_input == binding.local_shared_base
+    assert runtime.arguments.remote_b_output == binding.peer_shared_base
     assert not hasattr(backend, "execute")
-    assert not hasattr(backend, "allocate_window")
+    assert not hasattr(backend, "allocate_shared_window")
     drained = backend.drain()
     assert drained["kernel_elapsed_ns"] == 123
-    assert len(port.writes[0][1]) == 6 * CACHE_LINE_BYTES
+    assert any(size == 3 * CACHE_LINE_BYTES for _, size in runtime.writes)
     backend.close()
-    assert port.kernel.closed
+    assert runtime.buffer.closed

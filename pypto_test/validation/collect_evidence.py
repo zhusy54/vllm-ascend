@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from pypto_test.pseudo_pypto.contracts import MAX_ELEMENTS
+from pypto_test.pseudo_pypto.communication import MAX_ELEMENTS
 from pypto_test.run_proxy_service import run_proxy_service
 from pypto_test.validation.validation_utils import get_input_payload, return_result
 
