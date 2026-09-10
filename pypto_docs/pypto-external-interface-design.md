@@ -13,34 +13,60 @@
 
 ```mermaid
 flowchart TB
-    U["vLLM / 上层调用者"]
-    A["PyptoDistributedService"]
-    S["PseudoPyptoDistributedService"]
-    E["EndpointBundle"]
-    NB["NpuCommunicationBinding"]
-    WB["WseCommunicationBinding"]
-    B["BootstrapManager"]
-    P1["NPU CrossDeviceMemoryProvider"]
-    P2["WSE CrossDeviceMemoryProvider"]
-    N["NpuExecutionBackend"]
-    W["WseBackend"]
+    U["vLLM / 上层调用者<br/>非PyPTO"]
+    B["BootstrapManager<br/>非PyPTO"]
+    P1["NPU CrossDeviceMemoryProvider<br/>非PyPTO"]
+    P2["WSE CrossDeviceMemoryProvider<br/>非PyPTO"]
+    C["WSE Host控制进程 + HostControlRpc<br/>非PyPTO"]
 
-    U -->|"initialize / execute / health / drain / close"| A
-    A --> S
-    B -->|"构造期资源注入"| E
-    E --> S
-    E --> NB
-    NB --> N
-    P1 -->|"local/peer VA"| NB
-    P2 -->|"local/peer VA"| WB
-    WB --> W
+    subgraph PYPTO["PyPTO 软件边界：框内全部属于PyPTO"]
+        direction TB
+        A["PyptoDistributedService接口"]
+        S["PseudoPyptoDistributedService"]
+        N["NpuExecutionBackend"]
+        NC["NpuDeviceCommunication ABI"]
+        NK["Resident ABC Driver Kernel"]
+        W["WseBackend"]
+        WC["WseDeviceCommunication ABI"]
+        WK["Resident B Service Kernel"]
+
+        A --> S
+        S --> N
+        N --> NC
+        NC --> NK
+        W --> WC
+        WC --> WK
+        NK ==>|"A output + submission"| WK
+        WK ==>|"B output + completion"| NK
+    end
+
+    U -->|"边界① 北向服务接口<br/>initialize / execute / health / drain / close"| A
+    P1 --> B
+    B -->|"边界② NPU构造期资源注入<br/>EndpointBundle含NpuCommunicationBinding"| S
+    P2 -->|"边界② WSE构造期资源注入<br/>WseCommunicationBinding"| W
+    S -.->|"边界③ PyPTO出站控制接口<br/>WseServiceControl"| C
+    C -.->|"边界④ WSE backend托管接口<br/>initialize / health / drain / close"| W
+    B <-.->|"HostControlRpc；非逐请求"| C
+
+    classDef external fill:#f3f4f6,stroke:#6b7280,color:#111827
+    class U,B,P1,P2,C external
+    style PYPTO fill:#eef6ff,stroke:#1565c0,stroke-width:4px
 ```
 
-存在两类接口：
+图中`PyPTO 软件边界`外框是明确的软件归属线：框内模块和Device kernel属于PyPTO；
+框外的上层调用者、Bootstrap、memory provider、WSE Host控制进程和Host RPC均不属于PyPTO。
+`EndpointBundle`、两侧`CommunicationBinding`和request/response是跨边界数据结构，因此只标在
+连线上，不作为运行模块。
+
+跨越该边界的接口只有四类：
 
 1. 面向上层框架的服务接口：`PyptoDistributedService`。
-2. 面向外部 Bootstrap 的构造期资源注入接口：`EndpointBundle` 和两侧
-   `CommunicationBinding`。
+2. 面向外部Bootstrap的构造期资源注入接口：NPU侧`EndpointBundle`和WSE侧
+   `WseCommunicationBinding`。
+3. PyPTO调用外部WSE控制面的出站接口：`WseServiceControl`。接口由PyPTO定义，
+   `RemoteWseServiceControl`和`HostControlRpc`适配实现属于外部基础设施。
+4. WSE Host控制进程托管PyPTO `WseBackend`的生命周期接口。控制进程负责创建和调用backend，
+   backend及其resident kernel仍属于PyPTO。
 
 `CrossDeviceMemoryProvider`不是PyPTO业务接口。它属于外部基础设施，用于生成binding。
 
