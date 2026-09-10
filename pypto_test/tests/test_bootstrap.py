@@ -11,7 +11,15 @@ from pathlib import Path
 
 import pytest
 
-from pypto_test.infrastructure.bootstrap import BootstrapError, BootstrapManager
+import pypto_test.infrastructure.bootstrap as bootstrap_module
+from pypto_test.infrastructure.bootstrap import (
+    BootstrapError,
+    BootstrapManager,
+    build_npu_communication,
+    build_wse_communication,
+    create_npu_memory_provider,
+    create_wse_memory_provider,
+)
 from pypto_test.infrastructure.memory import AscendVmmMemoryProvider, WindowManifest
 from pypto_test.infrastructure.rpc import HostControlRpcError, MultiprocessingSocketRpc
 from pypto_test.pseudo_pypto.communication import (
@@ -41,20 +49,22 @@ class FakeWindow:
 class FakeVmmRuntime:
     device_id = 0
 
-    def __init__(self):
+    def __init__(self, *, local_address=1000, peer_address=2000):
         self.initialized = False
         self.closed = False
+        self.local_address = local_address
+        self.peer_address = peer_address
 
     def initialize(self):
         self.initialized = True
 
     def allocate_window(self, logical_bytes):
-        self.local_window = FakeWindow(1000, logical_bytes, logical_bytes)
+        self.local_window = FakeWindow(self.local_address, logical_bytes, logical_bytes)
         return self.local_window
 
     def import_window(self, exported, *, peer_device_id):
         del peer_device_id
-        self.peer_window = FakeWindow(2000, exported.mapping_bytes, exported.mapping_bytes)
+        self.peer_window = FakeWindow(self.peer_address, exported.mapping_bytes, exported.mapping_bytes)
         return self.peer_window
 
     def close(self):
@@ -147,7 +157,7 @@ def test_memory_provider_is_sole_shared_allocator_and_releaser():
     assert provider.evidence()["live_mapping_count"] == 0
 
 
-def test_bootstrap_keeps_three_host_and_communication_stages_separate():
+def test_bootstrap_keeps_three_host_and_communication_stages_separate(monkeypatch):
     runtime = FakeVmmRuntime()
     provider = AscendVmmMemoryProvider(
         role=EndpointRole.ATTENTION,
@@ -165,8 +175,8 @@ def test_bootstrap_keeps_three_host_and_communication_stages_separate():
         run_id="run",
         generation=1,
         rpc=rpc,
-        memory_provider_factory=lambda **kwargs: provider,
     )
+    monkeypatch.setattr(bootstrap_module, "create_npu_memory_provider", lambda **kwargs: provider)
     with pytest.raises(BootstrapError, match="WSE Host"):
         manager.launch_npu_host()
     manager.launch_wse_host(endpoint_target=lambda: None, kernel_binary=Path("b.o"), start_order="attention-first")
@@ -176,6 +186,88 @@ def test_bootstrap_keeps_three_host_and_communication_stages_separate():
     bundle = manager.build_communication()
     assert bundle.npu_communication.local_shared_base == 1000
     assert rpc.calls[0][0] == "BUILD_COMMUNICATION"
+
+
+def test_npu_and_wse_provider_creators_use_symmetric_role_configuration(monkeypatch):
+    configurations = []
+
+    class CapturingProvider:
+        def __init__(self, **kwargs):
+            configurations.append(kwargs)
+
+    monkeypatch.setattr(bootstrap_module, "AscendVmmMemoryProvider", CapturingProvider)
+    create_npu_memory_provider(device_id=2, generation=7)
+    create_wse_memory_provider(device_id=3, generation=7)
+
+    npu, wse = configurations
+    assert npu == {
+        "role": EndpointRole.ATTENTION,
+        "endpoint_id": "attention",
+        "device_id": 2,
+        "generation": 7,
+        "logical_bytes": NPU_SHARED_WINDOW_BYTES,
+    }
+    assert wse == {
+        "role": EndpointRole.WSE,
+        "endpoint_id": "wse",
+        "device_id": 3,
+        "generation": 7,
+        "logical_bytes": WSE_SHARED_WINDOW_BYTES,
+    }
+
+
+def test_npu_and_wse_build_helpers_share_allocate_attach_binding_order():
+    npu_runtime = FakeVmmRuntime()
+    npu_provider = AscendVmmMemoryProvider(
+        role=EndpointRole.ATTENTION,
+        endpoint_id="attention",
+        device_id=0,
+        generation=1,
+        logical_bytes=NPU_SHARED_WINDOW_BYTES,
+        runtime=npu_runtime,
+    )
+    npu_provider.initialize_host()
+    wse_manifest = WindowManifest(
+        "wse",
+        EndpointRole.WSE,
+        1,
+        1,
+        "wse",
+        WSE_SHARED_WINDOW_BYTES,
+        WSE_SHARED_WINDOW_BYTES,
+        88,
+    )
+    npu_binding, _ = build_npu_communication(npu_provider, FakeRpc(wse_manifest))
+
+    # Device VAs are process-local.  Deliberately use unrelated WSE values to
+    # prove that neither build helper assumes numerical VA equality.
+    wse_runtime = FakeVmmRuntime(local_address=3000, peer_address=4000)
+    wse_provider = AscendVmmMemoryProvider(
+        role=EndpointRole.WSE,
+        endpoint_id="wse",
+        device_id=1,
+        generation=1,
+        logical_bytes=WSE_SHARED_WINDOW_BYTES,
+        runtime=wse_runtime,
+    )
+    wse_provider.initialize_host()
+    npu_manifest = WindowManifest(
+        "attention",
+        EndpointRole.ATTENTION,
+        0,
+        1,
+        "npu",
+        NPU_SHARED_WINDOW_BYTES,
+        NPU_SHARED_WINDOW_BYTES,
+        99,
+    )
+    wse_binding, _ = build_wse_communication(wse_provider, npu_manifest.to_dict())
+
+    assert (npu_binding.local_shared_base, npu_binding.peer_shared_base) == (1000, 2000)
+    assert (wse_binding.local_shared_base, wse_binding.peer_shared_base) == (3000, 4000)
+    for provider in (npu_provider, wse_provider):
+        operations = [item["operation"] for item in provider.evidence()["audit"]]
+        assert operations == ["runtime_initialize", "allocate", "attach"]
 
 
 def test_bootstrap_source_does_not_own_transport_or_device_execution():

@@ -43,7 +43,7 @@
 
 补充证据：
 
-- V00：33个隔离单元测试通过，覆盖typed API、三阶段初始化、HostControlRpc、外部VMM provider、
+- V00：39个隔离单元测试通过，覆盖typed API、三阶段初始化、HostControlRpc、外部VMM provider、
   本地/共享内存拆分、Device通信ABI、依赖方向、BUSY、close幂等和evidence fail-closed。
 - V03两种启动顺序的输入和最终结果各传输1,118,272字节，结果逐元素匹配`2*x+5 mod 2^32`。
 - V04输入和最终结果各传输1,768,000字节，request ID为1～100且A/B/C均执行100次。

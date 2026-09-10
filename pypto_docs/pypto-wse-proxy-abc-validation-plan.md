@@ -240,16 +240,18 @@ mapping/owned VMM → reset/finalize ACL。
 ```text
 1. launch_wse_host
    MultiprocessingSocketRpc.spawn WSE Host
+   create_wse_memory_provider
    WSE external provider performs ACL/device initialization
    WSE_HOST_READY
 
 2. launch_npu_host
+   create_npu_memory_provider
    NPU external provider performs ACL/device initialization
 
 3. build_communication
-   NPU provider allocates/exports NPU shared window
+   build_npu_communication调用NPU provider分配/导出NPU shared window
    BUILD_COMMUNICATION(manifest) RPC
-   WSE provider allocates/exports WSE shared window and imports NPU window
+   build_wse_communication调用WSE provider分配/导出WSE shared window并导入NPU window
    RPC returns WSE manifest
    NPU provider imports WSE window
    Bootstrap creates lease and injects NPU binding
